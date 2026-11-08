@@ -47,9 +47,9 @@ button.warn{border-color:var(--warn)}button.danger{border-color:var(--bad)}
 <div class="card">
  <div class="row" style="justify-content:space-between;gap:8px">
   <div class="row" style="gap:12px"><b>Hashrate</b>
-   <span style="color:var(--acc);font-size:12px">— TH/s</span>
-   <span class="mut" style="font-size:12px">··· media</span>
-   <span style="color:var(--warn);font-size:12px">— chip °C</span>
+   <span style="color:var(--acc);font-size:12px"><b id="lvThs">—</b> TH/s</span>
+   <span class="mut" style="font-size:12px"><b id="lvAvg">—</b> media</span>
+   <span style="color:var(--warn);font-size:12px"><b id="lvTemp">—</b> chip °C</span>
   </div>
   <div class="seg" id="chartWin">
    <button data-w="3600" class="on">1 h</button><button data-w="21600">6 h</button><button data-w="86400">24 h</button>
@@ -81,6 +81,10 @@ button.warn{border-color:var(--warn)}button.danger{border-color:var(--bad)}
   <span class="mut" id="fanpct" style="font-size:12px;margin-left:4px"></span>
  </div>
  <div class="mut" style="font-size:12px;margin-bottom:12px">Auto = curva de fábrica (objetivo ~85 °C de chip, corte de seguridad a 105 °C). Un % fijo pone un suelo de ventilador sin tocar frecuencia ni voltaje.</div>
+ <div class="row" style="margin-bottom:12px"><span class="lbl">De fábrica</span>
+  <button id="factory" class="warn">Dejar de fábrica</button>
+  <span class="mut" style="font-size:12px">Ventilador en Auto y desactiva la curva propia.</span>
+ </div>
 
  <div class="card" style="background:#12151c;border-color:var(--line)">
   <div class="row" style="margin-bottom:8px"><b>Curva propia</b>
@@ -94,9 +98,7 @@ button.warn{border-color:var(--warn)}button.danger{border-color:var(--bad)}
    <button id="curveSave">Guardar curva</button>
   </div>
  </div>
- <div class="row" style="margin-bottom:12px"><span class="lbl">Ventilador por temperatura</span>
-  <button id="tempctl" data-act="tempcontrol">—</button>
-  <span class="lbl" style="margin-left:14px">LED de identificación</span>
+ <div class="row" style="margin-bottom:12px"><span class="lbl">LED de identificación</span>
   <button id="led" data-act="led">—</button>
  </div>
  <div class="row"><span class="lbl">Reiniciar el minero (~1-2 min sin minar)</span>
@@ -176,6 +178,9 @@ async function tick(){
   document.getElementById("sub").textContent=`${d.miner||""} · encendido ${Math.floor(up/3600)} h ${Math.floor(up%3600/60)} min · ${s.algorithm||""} · ${s.power?.plan||""}`;
   const k=[["Hashrate 20 s",(su.ths_20s||0).toFixed(2)+" TH/s"],["Media",(su.ths_avg||0).toFixed(2)+" TH/s"],["Errores HW",(su.hw_pct??"?")+" %"],["Rechazadas",(su.reject_pct??"?")+" %"]];
   document.getElementById("kpi").innerHTML=k.map(([a,b])=>`<div class="card"><div class="mut">${a}</div><div class="big">${esc(b)}</div></div>`).join("");
+  const _ct=(s.boards||[]).map(b=>b.temp_chip_c).filter(v=>v!=null),_mt=_ct.length?Math.max(..._ct):null;
+  const lv=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
+  lv("lvThs",(su.ths_20s||0).toFixed(2));lv("lvAvg",(su.ths_avg||0).toFixed(2));lv("lvTemp",_mt!=null?_mt.toFixed(0):"—");
   const cell=t=>t==null?"—":`<span class="${tc(t)}">${t.toFixed(0)}</span>`;
   document.getElementById("boards").innerHTML=(s.boards||[]).map(b=>`<tr><td>${esc(b.id)}</td><td class="${b.status==="Alive"?"o":"b"}">${esc(b.status)}</td><td>${b.ths_20s.toFixed(2)}</td><td>${esc(b.clock_mhz)}</td><td>${((b.voltage_mv||0)/1000).toFixed(2)}</td><td>${cell(b.temp_chip_c)}</td><td>${cell(b.temp_board_c)}</td><td>${esc(b.fans_rpm.join(" "))}</td><td>${esc(b.hw_pct)}</td></tr>`).join("");
   document.getElementById("pools").innerHTML=(s.pools||[]).map(p=>`<tr><td>${p.active?"●":""}</td><td>${esc(p.url)}</td><td>${esc(p.user)}</td><td>${esc(p.status)}</td><td>${esc(p.accepted)}</td><td>${esc(p.rejected)}</td></tr>`).join("");
@@ -187,7 +192,6 @@ async function tick(){
    const manual=!!s.power?.manual, pct=s.power?.fan_pct;
    document.querySelectorAll('#fans button').forEach(x=>{const f=x.dataset.fan;x.classList.toggle("on",f==="auto"?!manual:(manual&&String(pct)===f));});
    document.getElementById("fanpct").textContent=pct!=null?`plan: ${pct}%`:"";
-   const tcb=document.getElementById("tempctl");tcb.textContent=s.power?.temp_control?"Activado":"Desactivado";tcb.classList.toggle("on",!!s.power?.temp_control);
    const led=document.getElementById("led");led.textContent=s.power?.led?"Encendido":"Apagado";led.classList.toggle("on",!!s.power?.led);
   }
  }catch(e){document.getElementById("sub").textContent="sin datos: "+e}
@@ -202,12 +206,17 @@ async function send(action,arg,confirmMsg){
  }catch(e){toast("Error: "+e);}
  finally{busy=false;document.querySelectorAll("button").forEach(b=>b.disabled=false);setTimeout(tick,1200);}
 }
+async function factory(){
+ if(!confirm("¿Dejar el minero de fábrica?\n\nVentilador en Auto (curva del firmware, objetivo ~85 °C de chip, corte de seguridad a 105 °C) y se desactiva la curva propia."))return;
+ try{await curvePost({enabled:false});}catch(e){}
+ send("fan","auto");
+}
 function wire(){
  document.querySelectorAll("#modes button").forEach(b=>b.onclick=()=>send("mode",b.dataset.mode,
    b.dataset.mode==="idle"?"¿Poner el minero en REPOSO? Dejará de minar hasta que lo saques de reposo.":null));
  document.querySelectorAll("#fans button").forEach(b=>b.onclick=()=>send("fan",b.dataset.fan,null));
  wireCurve();
- const tcb=document.getElementById("tempctl");tcb.onclick=()=>send("tempcontrol",!tcb.classList.contains("on"));
+ document.getElementById("factory").onclick=factory;
  const led=document.getElementById("led");led.onclick=()=>send("led",!led.classList.contains("on"));
  document.getElementById("reboot").onclick=()=>send("reboot",null,"¿Reiniciar el minero? Estará ~1-2 min sin minar y volverá solo.");
 }
