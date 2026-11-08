@@ -23,18 +23,20 @@ import urllib.request
 # Only factory presets: no custom clock/voltage, which is where tuning can overheat.
 MODE_LEVELS = {"hash": 0, "eco": 2, "idle": 3}
 
-# Fixed fan % the panel may request. Floor of 40 so cooling is never starved
+# The panel's fan buttons; any integer % in [FAN_MIN, 100] is accepted (the
+# software curve uses arbitrary floors). Floor of 40 so cooling is never starved
 # (the factory hash preset already runs 30%). Only fans change, never clock/V.
 FAN_PCTS = (50, 75, 100)
+FAN_MIN = 40
 
 
 def _fan_pct(arg):
     try:
         pct = int(arg)
     except (TypeError, ValueError):
-        raise ControlError(f"fan must be 'auto', 'max' or one of {FAN_PCTS}")
-    if pct not in FAN_PCTS:
-        raise ControlError(f"fan % must be one of {FAN_PCTS}")
+        raise ControlError("fan must be 'auto', 'max' or a percent 40-100")
+    if not (FAN_MIN <= pct <= 100):
+        raise ControlError(f"fan % must be between {FAN_MIN} and 100")
     return pct
 
 # Paths this module is ever allowed to touch. Writes only here; nothing else.

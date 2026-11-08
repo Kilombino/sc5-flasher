@@ -13,6 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .collect import collect
 from .control import ACTIONS, Miner, ControlError
+from . import curve as curvemod
 
 PAGE = """<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>SC5 Pro II</title>
@@ -65,6 +66,20 @@ button.warn{border-color:var(--warn)}button.danger{border-color:var(--bad)}
   <span class="mut" id="fanpct" style="font-size:12px;margin-left:4px"></span>
  </div>
  <div class="mut" style="font-size:12px;margin-bottom:12px">Auto = curva de fábrica (objetivo ~85 °C de chip, corte de seguridad a 105 °C). Un % fijo pone un suelo de ventilador sin tocar frecuencia ni voltaje.</div>
+
+ <div class="card" style="background:#12151c;border-color:var(--line)">
+  <div class="row" style="margin-bottom:8px"><b>Curva propia</b>
+   <button id="curveToggle">—</button>
+   <span class="mut" id="curveState" style="font-size:12px"></span>
+  </div>
+  <div class="row">
+   <span class="lbl">Suelo</span><input id="curveBase" type="number" min="40" max="100" step="5" style="width:64px">
+   <span class="lbl">%, si el chip llega a</span><input id="curveTrip" type="number" min="60" max="95" step="1" style="width:64px">
+   <span class="lbl">°C →</span><input id="curveHot" type="number" min="50" max="100" step="5" style="width:64px"><span class="lbl">%</span>
+   <button id="curveSave">Guardar</button>
+  </div>
+  <div class="mut" style="font-size:12px;margin-top:6px">El panel vigila la temperatura y sube/baja el ventilador solo (nunca frecuencia ni voltaje). Al elegir un ventilador fijo arriba, la curva se apaga.</div>
+ </div>
  <div class="row" style="margin-bottom:12px"><span class="lbl">Ventilador por temperatura</span>
   <button id="tempctl" data-act="tempcontrol">—</button>
   <span class="lbl" style="margin-left:14px">LED de identificación</span>
@@ -128,9 +143,33 @@ function wire(){
  document.querySelectorAll("#modes button").forEach(b=>b.onclick=()=>send("mode",b.dataset.mode,
    b.dataset.mode==="idle"?"¿Poner el minero en REPOSO? Dejará de minar hasta que lo saques de reposo.":null));
  document.querySelectorAll("#fans button").forEach(b=>b.onclick=()=>send("fan",b.dataset.fan,null));
+ wireCurve();
  const tcb=document.getElementById("tempctl");tcb.onclick=()=>send("tempcontrol",!tcb.classList.contains("on"));
  const led=document.getElementById("led");led.onclick=()=>send("led",!led.classList.contains("on"));
  document.getElementById("reboot").onclick=()=>send("reboot",null,"¿Reiniciar el minero? Estará ~1-2 min sin minar y volverá solo.");
+}
+let curveCfg=null;
+async function curveRefresh(){
+ try{const s=await (await fetch("api/curve",{cache:"no-store"})).json();curveCfg=s.cfg;
+  const on=!!s.cfg.enabled;const t=document.getElementById("curveToggle");
+  t.textContent=on?"Activada":"Desactivada";t.classList.toggle("on",on);
+  if(document.activeElement.id!=="curveBase")document.getElementById("curveBase").value=s.cfg.base;
+  if(document.activeElement.id!=="curveTrip")document.getElementById("curveTrip").value=s.cfg.trip;
+  if(document.activeElement.id!=="curveHot")document.getElementById("curveHot").value=s.cfg.hot;
+  document.getElementById("curveState").textContent=on?`· ahora ${s.applied!=null?s.applied+"%":"—"} (chip ${s.last_temp!=null?s.last_temp.toFixed(0)+"°":"—"})${s.last_error?" · "+s.last_error:""}`:"";
+ }catch(e){}
+}
+async function curvePost(cfg){
+ const r=await fetch("api/curve",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(cfg)});
+ const j=await r.json();toast(j.cfg?"Curva guardada ✓":("Error: "+(j.error||r.status)));curveRefresh();
+}
+function wireCurve(){
+ document.getElementById("curveToggle").onclick=()=>curvePost({enabled:!(curveCfg&&curveCfg.enabled)});
+ document.getElementById("curveSave").onclick=()=>curvePost({
+   base:+document.getElementById("curveBase").value,
+   trip:+document.getElementById("curveTrip").value,
+   hot:+document.getElementById("curveHot").value});
+ curveRefresh();setInterval(curveRefresh,5000);
 }
 if(CONTROL)wire();
 tick();setInterval(tick,10000);
@@ -157,6 +196,11 @@ def serve(host, bind="127.0.0.1", port=8099, control=False):
     cache = _Cache(host)
     miner = Miner(host) if control else None
     page = PAGE.replace("__CONTROL__", "true" if control else "false")
+    supervisor = None
+    if control:
+        supervisor = curvemod.Supervisor(miner, cache.get)
+        if supervisor.cfg.get("enabled"):
+            supervisor.start()
 
     class H(BaseHTTPRequestHandler):
         def _send(self, code, body, ctype):
@@ -172,19 +216,30 @@ def serve(host, bind="127.0.0.1", port=8099, control=False):
                 self._send(200, page.encode(), "text/html; charset=utf-8")
             elif self.path == "/api/snapshot":
                 self._send(200, json.dumps(cache.get(), ensure_ascii=False).encode(), "application/json")
+            elif self.path == "/api/curve" and control:
+                self._send(200, json.dumps(supervisor.state()).encode(), "application/json")
             else:
                 self.send_error(404)
 
         def do_POST(self):
-            if self.path != "/api/control" or not control:
+            if not control or self.path not in ("/api/control", "/api/curve"):
                 self.send_error(404)
                 return
             try:
                 length = int(self.headers.get("Content-Length", 0))
                 req = json.loads(self.rfile.read(length) or b"{}")
+                if self.path == "/api/curve":
+                    cfg = {k: req[k] for k in ("enabled", "base", "trip", "hyst", "hot") if k in req}
+                    state = supervisor.update(cfg)
+                    cache.invalidate()
+                    self._send(200, json.dumps(state).encode(), "application/json")
+                    return
                 action = req.get("action")
                 if action not in ACTIONS:
                     raise ControlError(f"Unknown action {action!r}")
+                # A manual fan/mode choice overrides and disables the software curve.
+                if action in ("fan", "mode") and supervisor.cfg.get("enabled"):
+                    supervisor.update({"enabled": False})
                 result = miner.do(action, req.get("arg"))
                 cache.invalidate()
                 self._send(200, json.dumps(result).encode(), "application/json")
