@@ -39,3 +39,27 @@ Rutas que usa la interfaz (de su JS):
 
 Según paperclip-flasher, en el KDBox `PUT /mcb/protect` es lo que enciende el SSH de serie. Falta
 confirmar que en el SC5 Pro Ⅱ hace lo mismo antes de usarlo (fase 2).
+
+## Mecanismo del SSH (análisis estático, 8 nov 2026)
+
+Goldshell no publica el firmware del SC5 Pro Ⅱ. Se analizó el oficial **KD5 2.2.0**, que usa la
+**misma placa MCB_V3_3**, del repo `goldshellminer/firmware`. El `.cpb` lleva una cabecera de 512 B
+(`firmware-MCB_V3_3.tgz`) y después un `.tgz`; dentro, `firmware.ius` empieza por `+ius` y lleva el
+rootfs squashfs incrustado. Todo se extrajo e inspeccionó **sin ejecutar nada** (unsquashfs +
+desensamblado ARM Thumb con capstone).
+
+Hallazgos:
+
+- `minerd` registra los handlers de `/mcb/*` en una tabla. **En el arranque ejecuta
+  `/etc/init.d/S50sshd stop`**, así que el SSH queda apagado por defecto.
+- **`PUT /mcb/protect`** es el único handler que reenciende el SSH: llama a un envoltorio tipo
+  `system()` con `/etc/init.d/S50sshd start`. **`PUT /mcb/defend`** ejecuta el `stop`.
+- El firmware incluye OpenSSH real (`/usr/sbin/sshd`, `/usr/bin/ssh-keygen`), `sshd_config` por
+  defecto (puerto 22, `PermitRootLogin yes`, `PasswordAuthentication yes`) y usuario `root`.
+  `S50sshd` genera las claves de host la primera vez (puede tardar 1-2 min) y sale sin hacer nada
+  si falta `ssh-keygen`.
+
+En el minero real, `PUT /mcb/protect` devolvió 200 pero el puerto 22 siguió cerrado (escaneo
+completo), sin reiniciar ni perder hashrate. Hipótesis: la variante del SC5 aplica el cambio solo
+al reiniciar, o las claves de host tardaban. **Paso seguro pendiente:** reiniciar una vez con
+`/mcb/protect` ya aplicado y comprobar el 22. No se toca firmware ni arranque.
