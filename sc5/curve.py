@@ -123,11 +123,32 @@ def max_chip_temp(snapshot):
     return max(temps) if temps else None
 
 
+def current_fan_pct(snapshot):
+    """The fan % the miner is actually running right now (parsed from its live
+    power plan). Used so the curve drives toward the target from the miner's
+    REAL state, not from what we last think we set — so it reclaims control
+    after a miner reboot (which reverts the plan to a factory preset)."""
+    return (snapshot.get("power") or {}).get("fan_pct")
+
+
+def needs_write(target, actual, applied):
+    """True if we must set the fan to `target`. Compared against the miner's
+    REAL fan (`actual`) when we could read it, else our last `applied` value.
+    This is what makes the curve reclaim control after a reboot: the miner
+    comes back at a preset %, actual != target, so we re-assert the curve."""
+    if target is None:
+        return False
+    ref = actual if actual is not None else applied
+    return target != ref
+
+
 class Supervisor:
     """Background thread that enforces the curve by setting fan floors.
 
     Only ever calls miner.do("fan", <pct>) — the allowlisted fans-only action.
-    Writes only when the rounded target changes, so it does not spam the miner.
+    Each loop it compares the target against the miner's REAL current fan % and
+    writes only when they differ, so it does not spam the miner yet still
+    reclaims control after a reboot (which reverts the fan to a factory preset).
     """
 
     def __init__(self, miner, snapshot_fn, cfg=None, interval=10):
@@ -178,15 +199,21 @@ class Supervisor:
                     cfg = dict(self.cfg)
                 if not cfg.get("enabled"):
                     break
-                temp = max_chip_temp(self.snapshot_fn())
+                snap = self.snapshot_fn()
+                temp = max_chip_temp(snap)
+                actual = current_fan_pct(snap)
                 target = target_pct(temp, cfg)
                 with self._lock:
                     self.last_temp = temp
-                if target is not None and target != self.applied:
-                    self.miner.do("fan", target)
+                if target is not None:
+                    # Drive toward the target from the miner's REAL fan %, not a
+                    # cached value — so a reboot that reset the fan is corrected.
+                    if needs_write(target, actual, self.applied):
+                        self.miner.do("fan", target)
+                        with self._lock:
+                            self.last_error = None
                     with self._lock:
                         self.applied = target
-                        self.last_error = None
             except Exception as exc:
                 with self._lock:
                     self.last_error = str(exc)

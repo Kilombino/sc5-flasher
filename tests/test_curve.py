@@ -1,6 +1,7 @@
 import unittest
 
-from sc5.curve import interp, target_pct, max_chip_temp, _clamp_points, _clamp
+from sc5.curve import (interp, target_pct, max_chip_temp, _clamp_points, _clamp,
+                       current_fan_pct, needs_write)
 
 CFG = {"points": [[70, 50], [80, 75], [85, 100]], "step": 5}
 
@@ -56,6 +57,27 @@ class CurveClamp(unittest.TestCase):
         snap = {"boards": [{"temp_chip_c": 70}, {"temp_chip_c": 83}, {"temp_chip_c": None}]}
         self.assertEqual(max_chip_temp(snap), 83)
         self.assertIsNone(max_chip_temp({"boards": []}))
+
+
+class CurveReboot(unittest.TestCase):
+    def test_current_fan_pct(self):
+        self.assertEqual(current_fan_pct({"power": {"fan_pct": 65}}), 65)
+        self.assertIsNone(current_fan_pct({"power": {}}))
+        self.assertIsNone(current_fan_pct({}))
+
+    def test_reclaims_control_after_reboot(self):
+        # miner rebooted back to a 50% preset; our last applied was 65.
+        # Even though target (65) == cached applied (65), the REAL fan is 50,
+        # so we must re-write 65. Without the fix this case would be missed.
+        self.assertTrue(needs_write(target=65, actual=50, applied=65))
+
+    def test_no_write_when_already_at_target(self):
+        self.assertFalse(needs_write(target=65, actual=65, applied=50))
+        self.assertFalse(needs_write(target=None, actual=50, applied=50))
+
+    def test_falls_back_to_applied_when_fan_unreadable(self):
+        self.assertTrue(needs_write(target=65, actual=None, applied=50))
+        self.assertFalse(needs_write(target=65, actual=None, applied=65))
 
 
 if __name__ == "__main__":
