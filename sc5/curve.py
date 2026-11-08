@@ -1,22 +1,56 @@
-"""Software fan curve for the SC5 Pro II.
+"""Multi-point software fan curve for the SC5 Pro II.
 
 The stock firmware's temperature target lives in a file we can't edit (SSH is
-closed). So we run our own curve on top of the one safe lever we have — the fan
-floor (fans-only, clock/voltage never touched). The supervisor watches the chip
-temperature and, with hysteresis, keeps the fan floor at `base` %, bumping it to
-`hot` when the chip reaches `trip` °C and letting it drop back once it cools to
-`trip - hyst`.
+closed), so the service runs its own curve on the one safe lever we have — the
+fan floor (fans-only; clock/voltage never touched).
 
-`decide()` is a pure function so the logic is unit-tested without a miner.
+The curve is a list of [chip_temp_C, fan_%] points. Between points the target
+fan % is interpolated linearly; below the first point it holds the first %, above
+the last it holds the last. A background supervisor reads the chip temperature,
+rounds the target to `step` %, and sets the fan floor when it changes — so the
+fans ramp up and down on their own, smoothly, without spamming the miner.
+
+`interp()` / `target_pct()` are pure functions so the logic is unit-tested.
 """
 
 import json
 import os
 import threading
-import time
+
+from .control import FAN_MIN
 
 CONFIG = os.path.expanduser("~/.config/sc5-flasher/curve.json")
-DEFAULT = {"enabled": False, "base": 75, "trip": 80, "hyst": 4, "hot": 100}
+DEFAULT = {
+    "enabled": False,
+    # progressive: 50% up to 70 C, ramping to 100% by 85 C
+    "points": [[70, 50], [80, 75], [85, 100]],
+    "step": 5,
+}
+
+
+def _clamp_points(points):
+    out = []
+    for t, p in points:
+        t = max(50, min(95, int(round(t))))
+        p = max(FAN_MIN, min(100, int(round(p))))
+        out.append([t, p])
+    out.sort(key=lambda tp: tp[0])
+    # drop duplicate temps (keep the higher %), enforce non-decreasing %
+    dedup = {}
+    for t, p in out:
+        dedup[t] = max(dedup.get(t, 0), p)
+    pts = sorted([t, p] for t, p in dedup.items())
+    best = FAN_MIN
+    for tp in pts:
+        best = tp[1] = max(best, tp[1])   # fans never drop as temp rises
+    return pts or [[70, 50]]
+
+
+def _clamp(cfg):
+    cfg["enabled"] = bool(cfg.get("enabled"))
+    cfg["step"] = max(1, min(10, int(cfg.get("step", 5))))
+    cfg["points"] = _clamp_points(cfg.get("points") or DEFAULT["points"])
+    return cfg
 
 
 def load():
@@ -26,16 +60,11 @@ def load():
             cfg.update(json.load(fh))
     except (OSError, ValueError):
         pass
-    return cfg
-
-
-def _clamp(cfg):
-    cfg["base"] = max(40, min(100, int(cfg["base"])))
-    cfg["hot"] = max(cfg["base"], min(100, int(cfg["hot"])))  # hot >= base
-    cfg["trip"] = max(60, min(95, int(cfg["trip"])))
-    cfg["hyst"] = max(1, min(15, int(cfg["hyst"])))
-    cfg["enabled"] = bool(cfg["enabled"])
-    return cfg
+    cfg.pop("base", None)   # drop legacy single-point keys if present
+    cfg.pop("trip", None)
+    cfg.pop("hyst", None)
+    cfg.pop("hot", None)
+    return _clamp(cfg)
 
 
 def save(cfg):
@@ -50,18 +79,32 @@ def save(cfg):
     return merged
 
 
-def decide(temp_c, applied, cfg):
-    """Return the fan floor % to apply, given the chip temp and what we applied
-    last time. Hysteresis: go `hot` at/above `trip`, back to `base` at/below
-    `trip - hyst`, and hold the current value in between. None temp → no change."""
-    base, trip, hyst, hot = cfg["base"], cfg["trip"], cfg["hyst"], cfg["hot"]
-    if temp_c is None:
-        return applied if applied is not None else base
-    if temp_c >= trip:
-        return hot
-    if temp_c <= trip - hyst:
-        return base
-    return applied if applied is not None else base
+def interp(temp_c, points):
+    """Linear interpolation of fan % at temp_c over sorted [temp, pct] points.
+    Flat below the first point and above the last."""
+    pts = sorted(points)
+    if temp_c is None or not pts:
+        return None
+    if temp_c <= pts[0][0]:
+        return float(pts[0][1])
+    if temp_c >= pts[-1][0]:
+        return float(pts[-1][1])
+    for (t0, p0), (t1, p1) in zip(pts, pts[1:]):
+        if t0 <= temp_c <= t1:
+            if t1 == t0:
+                return float(max(p0, p1))
+            return p0 + (p1 - p0) * (temp_c - t0) / (t1 - t0)
+    return float(pts[-1][1])
+
+
+def target_pct(temp_c, cfg):
+    """The fan % to apply: interpolated, rounded to `step`, clamped to [FAN_MIN,100]."""
+    raw = interp(temp_c, cfg["points"])
+    if raw is None:
+        return None
+    step = cfg.get("step", 5)
+    pct = int(round(raw / step) * step)
+    return max(FAN_MIN, min(100, pct))
 
 
 def max_chip_temp(snapshot):
@@ -71,11 +114,10 @@ def max_chip_temp(snapshot):
 
 
 class Supervisor:
-    """Background thread that enforces the software curve by setting fan floors.
+    """Background thread that enforces the curve by setting fan floors.
 
-    It only ever calls miner.do("fan", <pct>) — the same allowlisted, fans-only
-    action the buttons use. It writes only when the target floor changes, so it
-    does not spam the miner.
+    Only ever calls miner.do("fan", <pct>) — the allowlisted fans-only action.
+    Writes only when the rounded target changes, so it does not spam the miner.
     """
 
     def __init__(self, miner, snapshot_fn, cfg=None, interval=10):
@@ -83,7 +125,7 @@ class Supervisor:
         self.snapshot_fn = snapshot_fn
         self.cfg = cfg or load()
         self.interval = interval
-        self.applied = None          # last fan % we set
+        self.applied = None
         self.last_temp = None
         self.last_error = None
         self._stop = threading.Event()
@@ -99,7 +141,7 @@ class Supervisor:
     def update(self, cfg):
         with self._lock:
             self.cfg = save({**self.cfg, **cfg})
-            self.applied = None  # force re-evaluation on next tick
+            self.applied = None
         if self.cfg.get("enabled"):
             self.start()
         else:
@@ -126,9 +168,8 @@ class Supervisor:
                     cfg = dict(self.cfg)
                 if not cfg.get("enabled"):
                     break
-                snap = self.snapshot_fn()
-                temp = max_chip_temp(snap)
-                target = decide(temp, self.applied, cfg)
+                temp = max_chip_temp(self.snapshot_fn())
+                target = target_pct(temp, cfg)
                 with self._lock:
                     self.last_temp = temp
                 if target is not None and target != self.applied:
@@ -136,6 +177,6 @@ class Supervisor:
                     with self._lock:
                         self.applied = target
                         self.last_error = None
-            except Exception as exc:  # keep the loop alive; surface the error
+            except Exception as exc:
                 with self._lock:
                     self.last_error = str(exc)
