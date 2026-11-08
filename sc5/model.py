@@ -95,6 +95,8 @@ def build_snapshot(raw):
     snap["power"] = {
         "plan": setting.get("manualPowerplan"),
         "manual": setting.get("manual"),
+        "select": setting.get("select"),
+        "led": setting.get("ledcontrol"),
         "temp_control": setting.get("tempcontrol"),
         "plans": [pl.get("info") for pl in setting.get("powerplans") or []],
     }

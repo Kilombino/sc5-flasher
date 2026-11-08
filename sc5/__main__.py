@@ -40,10 +40,12 @@ def main(argv=None):
     st = sub.add_parser("status", help="print a one-shot report")
     st.add_argument("host")
     st.add_argument("--json", action="store_true")
-    sv = sub.add_parser("serve", help="local read-only dashboard")
+    sv = sub.add_parser("serve", help="local dashboard (read-only unless --control)")
     sv.add_argument("host")
     sv.add_argument("--bind", default="127.0.0.1")
     sv.add_argument("--port", type=int, default=8099)
+    sv.add_argument("--control", action="store_true",
+                    help="enable allowlisted controls (mode/LED/temp/reboot); needs the password in ~/.config/sc5-flasher/secrets.env")
     a = ap.parse_args(argv)
 
     if a.cmd == "status":
@@ -52,7 +54,7 @@ def main(argv=None):
         return 0 if not snap.get("errors") else 1
     if a.cmd == "serve":
         from .dashboard import serve
-        serve(a.host, a.bind, a.port)
+        serve(a.host, a.bind, a.port, control=a.control)
         return 0
     return 2
 
