@@ -100,6 +100,26 @@ class ControlGuards(unittest.TestCase):
         with mock.patch.object(m, "_request", side_effect=fake_request):
             m.do("fan", "auto")
         self.assertIs(captured["body"]["manual"], False)
+        # "auto" must re-enable the firmware thermal ramp (safety backstop)
+        self.assertIs(captured["body"]["tempcontrol"], True)
+
+    def test_mode_enables_tempcontrol_backstop(self):
+        captured = {}
+
+        def fake_request(path, method="GET", body=None, token=None):
+            if path.startswith("/user/login"):
+                return {"JWT Token": "tok"}
+            if path == "/mcb/setting" and method == "GET":
+                return {"select": 0, "manual": True, "tempcontrol": False,
+                        "manualPowerplan": "700 MHz 11750 V 30 RPM 30 RPM PV 11900", "powerplans": []}
+            if path == "/mcb/setting" and method == "PUT":
+                captured["body"] = body
+            return None
+
+        m = Miner("127.0.0.1", password="x")
+        with mock.patch.object(m, "_request", side_effect=fake_request):
+            m.do("mode", "hash")
+        self.assertIs(captured["body"]["tempcontrol"], True)   # never a bare preset without ramp
 
     def test_fan_percent_step(self):
         captured = {}

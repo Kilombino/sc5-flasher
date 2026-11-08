@@ -136,6 +136,10 @@ class Miner:
                     raise ControlError(f"mode must be one of {sorted(MODE_LEVELS)}")
                 cfg["select"] = MODE_LEVELS[arg]
                 cfg["manual"] = False  # use the factory preset, not custom tuning
+                # Keep the firmware's thermal ramp ON as a backstop: a bare preset
+                # (Hash runs only 30% fans) must never sit without temperature
+                # control, or the chips climb with the fans low.
+                cfg["tempcontrol"] = True
             elif action == "fan":
                 # Set ONLY the fan %, keeping clock and voltage byte-identical to the
                 # active plan. More cooling can't brick; we never touch MHz/V. "auto"
@@ -144,6 +148,10 @@ class Miner:
                 # starve cooling.
                 if arg == "auto":
                     cfg["manual"] = False
+                    # "auto" MUST mean the firmware ramps fans to its temp target.
+                    # Without this the preset's fixed 30% fan runs with no thermal
+                    # ramp — exactly how the chips reached 90 C on 2026-11-08.
+                    cfg["tempcontrol"] = True
                 else:
                     pct = 100 if arg == "max" else _fan_pct(arg)
                     plan = cfg.get("manualPowerplan") or ""
