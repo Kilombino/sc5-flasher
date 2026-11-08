@@ -1,12 +1,20 @@
+# systemd USER unit: keep the SC5 Pro II panel running and start it on boot.
+# Install: edit the paths/IPs below, then
+#   cp sc5-panel.service.example ~/.config/systemd/user/sc5-panel.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now sc5-panel.service
+#   loginctl enable-linger "$USER"     # so it survives logout/reboot
 [Unit]
-Description=Panel de control del minero Goldshell SC5 Pro II (solo LAN, http://192.168.0.14:8099)
+Description=Goldshell SC5 Pro II control panel
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/start10/Projects/sc5-flasher
-ExecStart=/usr/bin/python3 -m sc5 serve 192.168.0.197 --control --bind 192.168.0.14 --port 8099
+WorkingDirectory=%h/sc5-flasher
+# <MINER_IP>: the miner's LAN address. --bind <LAN_IP> to reach it from other
+# devices (LAN only, no login); omit --bind to keep it on localhost.
+ExecStart=/usr/bin/python3 -m sc5 serve <MINER_IP> --control --bind <LAN_IP> --port 8099
 Restart=on-failure
 RestartSec=5
 Nice=10

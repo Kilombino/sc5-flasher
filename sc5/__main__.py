@@ -1,8 +1,8 @@
-"""sc5: read-only tools for the Goldshell SC5 Pro II.
+"""sc5: dashboard and control tools for the Goldshell SC5 Pro II.
 
-  python3 -m sc5 status 192.168.0.197          one-shot report
-  python3 -m sc5 status 192.168.0.197 --json   same, as JSON
-  python3 -m sc5 serve 192.168.0.197           local dashboard on http://127.0.0.1:8099
+  python3 -m sc5 status 192.168.1.50          one-shot report
+  python3 -m sc5 status 192.168.1.50 --json   same, as JSON
+  python3 -m sc5 serve 192.168.1.50           local dashboard on http://127.0.0.1:8099
 """
 
 import argparse
