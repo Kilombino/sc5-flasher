@@ -9,6 +9,16 @@ Inspired by [connorslab/paperclip-flasher](https://github.com/connorslab/papercl
 (which targets the Goldshell KDBox, a different board); this is a separate, read-
 and-control tool for the SC5 Pro Ⅱ.
 
+## Screenshots
+
+The dark dashboard, with the hashrate + chip-temperature graph (1 h / 6 h / 24 h):
+
+<img src="docs/img/dashboard.jpg" alt="Dashboard with hashrate and temperature graph" width="320">
+
+The controls and the software fan curve:
+
+<img src="docs/img/control.jpg" alt="Controls and the software fan curve" width="760">
+
 > **Safety first.** Every write is a fixed, reversible operation from a closed
 > allowlist (`sc5/control.py`). The browser only sends an *action name*, never a
 > device path or raw payload, so there is no code path to `/mcb/facrst` (factory
