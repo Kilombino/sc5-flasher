@@ -23,6 +23,20 @@ import urllib.request
 # Only factory presets: no custom clock/voltage, which is where tuning can overheat.
 MODE_LEVELS = {"hash": 0, "eco": 2, "idle": 3}
 
+# Fixed fan % the panel may request. Floor of 40 so cooling is never starved
+# (the factory hash preset already runs 30%). Only fans change, never clock/V.
+FAN_PCTS = (50, 75, 100)
+
+
+def _fan_pct(arg):
+    try:
+        pct = int(arg)
+    except (TypeError, ValueError):
+        raise ControlError(f"fan must be 'auto', 'max' or one of {FAN_PCTS}")
+    if pct not in FAN_PCTS:
+        raise ControlError(f"fan % must be one of {FAN_PCTS}")
+    return pct
+
 # Paths this module is ever allowed to touch. Writes only here; nothing else.
 _READ = "/mcb/setting"
 _WRITE_SETTING = "/mcb/setting"
@@ -121,17 +135,18 @@ class Miner:
                 cfg["select"] = MODE_LEVELS[arg]
                 cfg["manual"] = False  # use the factory preset, not custom tuning
             elif action == "fan":
-                # Raise/lower ONLY the fan %, keeping clock and voltage byte-identical
-                # to the active plan. More cooling can't brick; we never touch MHz/V.
-                if arg not in ("max", "auto"):
-                    raise ControlError("fan must be 'max' or 'auto'")
+                # Set ONLY the fan %, keeping clock and voltage byte-identical to the
+                # active plan. More cooling can't brick; we never touch MHz/V. "auto"
+                # hands fan control back to the factory preset + temperature curve.
+                # "max" is 100%. A numeric % is clamped to a safe floor so we can't
+                # starve cooling.
                 if arg == "auto":
-                    cfg["manual"] = False  # fans follow the selected preset + temp control
+                    cfg["manual"] = False
                 else:
+                    pct = 100 if arg == "max" else _fan_pct(arg)
                     plan = cfg.get("manualPowerplan") or ""
-                    # replace the two "<n> RPM <n> RPM" fan fields with 100; leave the
-                    # rest (MHz, V, PV) exactly as-is. Refuse if the shape is unexpected.
-                    new_plan, n = re.subn(r"\d+\s*RPM\s+\d+\s*RPM", "100 RPM 100 RPM", plan, count=1)
+                    new_plan, n = re.subn(r"\d+\s*RPM\s+\d+\s*RPM",
+                                          f"{pct} RPM {pct} RPM", plan, count=1)
                     if n != 1:
                         raise ControlError(f"Unexpected power-plan format: {plan!r}")
                     cfg["manualPowerplan"] = new_plan

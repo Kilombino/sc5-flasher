@@ -101,12 +101,30 @@ class ControlGuards(unittest.TestCase):
             m.do("fan", "auto")
         self.assertIs(captured["body"]["manual"], False)
 
+    def test_fan_percent_step(self):
+        captured = {}
+
+        def fake_request(path, method="GET", body=None, token=None):
+            if path.startswith("/user/login"):
+                return {"JWT Token": "tok"}
+            if path == "/mcb/setting" and method == "GET":
+                return {"manual": False, "manualPowerplan": "700 MHz 11750 V 30 RPM 30 RPM PV 11900", "powerplans": []}
+            if path == "/mcb/setting" and method == "PUT":
+                captured["body"] = body
+            return None
+
+        m = Miner("127.0.0.1", password="x")
+        with mock.patch.object(m, "_request", side_effect=fake_request):
+            m.do("fan", 75)
+        self.assertEqual(captured["body"]["manualPowerplan"], "700 MHz 11750 V 75 RPM 75 RPM PV 11900")
+
     def test_fan_bad_arg_rejected(self):
         m = Miner("127.0.0.1", password="x")
         with mock.patch.object(m, "_login", return_value="tok"), \
              mock.patch.object(m, "_request", return_value={"manualPowerplan": "700 MHz 11750 V 30 RPM 30 RPM PV 11900"}):
-            with self.assertRaises(ControlError):
-                m.do("fan", "turbo")
+            for bad in ("turbo", 30, 20, 0, 999):   # 30/20/0 would starve cooling
+                with self.assertRaises(ControlError):
+                    m.do("fan", bad)
 
     def test_reboot_puts_restart(self):
         calls = []

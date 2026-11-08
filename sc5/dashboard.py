@@ -55,13 +55,16 @@ button.warn{border-color:var(--warn)}button.danger{border-color:var(--bad)}
    <button data-mode="idle" class="warn">Reposo · 0 MHz</button>
   </div>
  </div>
- <div class="row" style="margin-bottom:12px"><span class="lbl">Ventiladores</span>
+ <div class="row" style="margin-bottom:6px"><span class="lbl">Ventiladores</span>
   <div class="seg" id="fans">
    <button data-fan="auto">Auto</button>
-   <button data-fan="max">Máximo · 100%</button>
+   <button data-fan="50">50%</button>
+   <button data-fan="75">75%</button>
+   <button data-fan="100">100%</button>
   </div>
   <span class="mut" id="fanpct" style="font-size:12px;margin-left:4px"></span>
  </div>
+ <div class="mut" style="font-size:12px;margin-bottom:12px">Auto = curva de fábrica (objetivo ~85 °C de chip, corte de seguridad a 105 °C). Un % fijo pone un suelo de ventilador sin tocar frecuencia ni voltaje.</div>
  <div class="row" style="margin-bottom:12px"><span class="lbl">Ventilador por temperatura</span>
   <button id="tempctl" data-act="tempcontrol">—</button>
   <span class="lbl" style="margin-left:14px">LED de identificación</span>
@@ -104,8 +107,7 @@ async function tick(){
    const sel=s.power?.select;lastMode=sel;
    document.querySelectorAll("#modes button").forEach(x=>x.classList.toggle("on",{hash:0,eco:2,idle:3}[x.dataset.mode]===sel));
    const manual=!!s.power?.manual, pct=s.power?.fan_pct;
-   document.querySelector('#fans button[data-fan="max"]').classList.toggle("on",manual&&pct===100);
-   document.querySelector('#fans button[data-fan="auto"]').classList.toggle("on",!manual);
+   document.querySelectorAll('#fans button').forEach(x=>{const f=x.dataset.fan;x.classList.toggle("on",f==="auto"?!manual:(manual&&String(pct)===f));});
    document.getElementById("fanpct").textContent=pct!=null?`plan: ${pct}%`:"";
    const tcb=document.getElementById("tempctl");tcb.textContent=s.power?.temp_control?"Activado":"Desactivado";tcb.classList.toggle("on",!!s.power?.temp_control);
    const led=document.getElementById("led");led.textContent=s.power?.led?"Encendido":"Apagado";led.classList.toggle("on",!!s.power?.led);
