@@ -44,9 +44,19 @@ button.warn{border-color:var(--warn)}button.danger{border-color:var(--bad)}
 
 <div class="grid" id="kpi"></div>
 
-<div class="card"><div class="row" style="justify-content:space-between;margin-bottom:6px">
- <b>Hashrate</b><span class="mut" id="chartInfo" style="font-size:12px"></span></div>
- <canvas id="chart" height="170" style="width:100%;display:block"></canvas></div>
+<div class="card">
+ <div class="row" style="justify-content:space-between;gap:8px">
+  <div class="row" style="gap:12px"><b>Hashrate</b>
+   <span style="color:var(--acc);font-size:12px">— TH/s</span>
+   <span class="mut" style="font-size:12px">··· media</span>
+   <span style="color:var(--warn);font-size:12px">— chip °C</span>
+  </div>
+  <div class="seg" id="chartWin">
+   <button data-w="3600" class="on">1 h</button><button data-w="21600">6 h</button><button data-w="86400">24 h</button>
+  </div>
+ </div>
+ <div class="mut" id="chartInfo" style="font-size:12px;margin:4px 0 2px"></div>
+ <canvas id="chart" height="190" style="width:100%;display:block"></canvas></div>
 
 <div class="card"><table><thead><tr><th>Placa</th><th>Estado</th><th>TH/s</th><th>MHz</th><th>V</th><th>Chip °C</th><th>Placa °C</th><th>Ventiladores</th><th>HW %</th></tr></thead><tbody id="boards"></tbody></table>
 <div class="mut" style="font-size:12px;margin-top:8px">«Chip» = sensor del ASIC (el que calienta). «Placa» = sensor de la placa, el que muestra el panel oficial de Goldshell.</div></div>
@@ -106,33 +116,54 @@ button.warn{border-color:var(--warn)}button.danger{border-color:var(--bad)}
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const tc=t=>t>=90?"b":t>=80?"w":"o";
 const cssv=n=>(getComputedStyle(document.documentElement).getPropertyValue(n)||"#888").trim();
+let chartWin=3600;
+const hhmm=t=>{const d=new Date(t*1000);return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");};
 async function drawChart(){
  const c=document.getElementById("chart");if(!c)return;
- let data;try{data=(await (await fetch("api/history",{cache:"no-store"})).json()).samples||[];}catch(e){return;}
- const dpr=window.devicePixelRatio||1,W=c.clientWidth||600,H=170;
+ let all;try{all=(await (await fetch("api/history",{cache:"no-store"})).json()).samples||[];}catch(e){return;}
+ const dpr=window.devicePixelRatio||1,W=c.clientWidth||600,H=190;
  c.width=W*dpr;c.height=H*dpr;const x=c.getContext("2d");x.scale(dpr,dpr);x.clearRect(0,0,W,H);
- if(data.length<2){x.fillStyle=cssv("--mut");x.font="12px system-ui";x.fillText("Recogiendo datos…",10,22);document.getElementById("chartInfo").textContent="";return;}
- const pad={l:42,r:8,t:10,b:18},t0=data[0][0],t1=data[data.length-1][0];
- const ths=data.map(d=>d[1]),avg=data.map(d=>d[2]);
+ const info=document.getElementById("chartInfo");
+ if(all.length<2){x.fillStyle=cssv("--mut");x.font="12px system-ui";x.fillText("Recogiendo datos…",10,22);info.textContent="";return;}
+ // x domain = the chosen window, anchored to the latest sample (so the axis
+ // always shows e.g. 24 h even while it is still filling from the right).
+ const ref=all[all.length-1][0],x0=ref-chartWin,x1=ref;
+ const data=all.filter(d=>d[0]>=x0-30);
+ const pad={l:42,r:38,t:12,b:22};
+ const PX=W-pad.l-pad.r,PY=H-pad.t-pad.b;
+ const ths=data.map(d=>d[1]).filter(v=>v!=null);
+ const temps=data.map(d=>d[3]).filter(v=>v!=null);
  let mn=Math.min(...ths),mx=Math.max(...ths);
- if(mx-mn<0.5){mx+=0.25;mn-=0.25;}const span=mx-mn;mn=Math.max(0,mn-span*0.12);mx+=span*0.12;
- const px=t=>pad.l+(W-pad.l-pad.r)*(t1===t0?1:(t-t0)/(t1-t0));
- const py=v=>pad.t+(H-pad.t-pad.b)*(1-(v-mn)/((mx-mn)||1));
- x.strokeStyle=cssv("--line");x.fillStyle=cssv("--mut");x.font="11px system-ui";x.lineWidth=1;
- for(let i=0;i<=3;i++){const v=mn+(mx-mn)*i/3,yy=py(v);x.beginPath();x.moveTo(pad.l,yy);x.lineTo(W-pad.r,yy);x.stroke();x.fillText(v.toFixed(1),4,yy+3);}
- const line=(arr,base)=>{x.beginPath();let started=false;arr.forEach((d,i)=>{const v=base?d[1]:d[2];if(v==null){started=false;return;}const X=px(d[0]),Y=py(v);started?x.lineTo(X,Y):x.moveTo(X,Y);started=true;});};
+ if(mx-mn<0.5){mx+=0.25;mn-=0.25;}let sp=mx-mn;mn=Math.max(0,mn-sp*0.12);mx+=sp*0.12;
+ let tmn=temps.length?Math.min(...temps):60,tmx=temps.length?Math.max(...temps):90;
+ if(tmx-tmn<6){tmx+=3;tmn-=3;}tmn-=2;tmx+=2;
+ const px=t=>pad.l+PX*Math.max(0,Math.min(1,(t-x0)/((x1-x0)||1)));
+ const py=v=>pad.t+PY*(1-(v-mn)/((mx-mn)||1));
+ const pyt=v=>pad.t+PY*(1-(v-tmn)/((tmx-tmn)||1));
+ // horizontal grid + left (TH/s) axis
+ x.font="11px system-ui";x.lineWidth=1;
+ for(let i=0;i<=3;i++){const v=mn+(mx-mn)*i/3,yy=py(v);x.strokeStyle=cssv("--line");x.beginPath();x.moveTo(pad.l,yy);x.lineTo(W-pad.r,yy);x.stroke();x.fillStyle=cssv("--mut");x.textAlign="right";x.fillText(v.toFixed(1),pad.l-4,yy+3);}
+ // right (°C) axis labels
+ x.fillStyle=cssv("--warn");x.textAlign="left";
+ for(let i=0;i<=3;i++){const v=tmn+(tmx-tmn)*i/3;x.fillText(v.toFixed(0)+"°",W-pad.r+4,pyt(v)+3);}
+ // x axis (hours)
+ const N=W<520?3:6;x.fillStyle=cssv("--mut");x.textAlign="center";
+ for(let i=0;i<=N;i++){const t=x0+(x1-x0)*i/N,X=px(t);x.strokeStyle=cssv("--line");x.globalAlpha=.5;x.beginPath();x.moveTo(X,pad.t);x.lineTo(X,H-pad.b);x.stroke();x.globalAlpha=1;x.fillText(hhmm(t),X,H-6);}
+ const draw=idx=>{x.beginPath();let on=false;data.forEach(d=>{const v=d[idx];if(v==null){on=false;return;}const X=px(d[0]),Y=idx===3?pyt(v):py(v);on?x.lineTo(X,Y):x.moveTo(X,Y);on=true;});};
  // area under ths
- x.beginPath();data.forEach((d,i)=>{const X=px(d[0]),Y=py(d[1]);i?x.lineTo(X,Y):x.moveTo(X,Y);});
- x.lineTo(px(t1),py(mn));x.lineTo(px(t0),py(mn));x.closePath();
+ x.beginPath();let on=false;data.forEach(d=>{const X=px(d[0]),Y=py(d[1]);on?x.lineTo(X,Y):x.moveTo(X,Y);on=true;});
+ x.lineTo(px(data[data.length-1][0]),py(mn));x.lineTo(px(data[0][0]),py(mn));x.closePath();
  const g=x.createLinearGradient(0,pad.t,0,H-pad.b);g.addColorStop(0,"rgba(90,169,255,.28)");g.addColorStop(1,"rgba(90,169,255,0)");x.fillStyle=g;x.fill();
+ // chip temp (right axis)
+ draw(3);x.strokeStyle=cssv("--warn");x.lineWidth=1.4;x.stroke();
  // avg (faint dashed)
- x.save();x.setLineDash([4,4]);line(data,false);x.strokeStyle=cssv("--mut");x.lineWidth=1;x.stroke();x.restore();
+ x.save();x.setLineDash([4,4]);draw(2);x.strokeStyle=cssv("--mut");x.lineWidth=1;x.stroke();x.restore();
  // ths (main)
- line(data,true);x.strokeStyle=cssv("--acc");x.lineWidth=1.8;x.stroke();
- const last=ths[ths.length-1],mins=Math.round((t1-t0)/60);
- const win=mins>=60?(mins/60).toFixed(1)+" h":mins+" min";
- document.getElementById("chartInfo").textContent=`${last.toFixed(2)} TH/s · mín ${Math.min(...ths).toFixed(2)} · máx ${Math.max(...ths).toFixed(2)} · ${win}`;
+ draw(1);x.strokeStyle=cssv("--acc");x.lineWidth=1.8;x.stroke();
+ const last=ths[ths.length-1],lt=temps.length?temps[temps.length-1]:null;
+ info.textContent=`${last.toFixed(2)} TH/s · mín ${Math.min(...ths).toFixed(2)} · máx ${Math.max(...ths).toFixed(2)}`+(lt!=null?` · chip ${lt.toFixed(0)}°`:"");
 }
+function wireChartWin(){document.querySelectorAll("#chartWin button").forEach(b=>b.onclick=()=>{chartWin=+b.dataset.w;document.querySelectorAll("#chartWin button").forEach(o=>o.classList.toggle("on",o===b));drawChart();});}
 const CONTROL=__CONTROL__;
 let busy=false,lastMode=null;
 function toast(m){const t=document.getElementById("toast");t.textContent=m;t.classList.add("show");clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove("show"),3500);}
@@ -210,6 +241,7 @@ function wireCurve(){
  curveRefresh();setInterval(curveRefresh,5000);
 }
 if(CONTROL)wire();
+wireChartWin();
 tick();setInterval(tick,10000);
 drawChart();setInterval(drawChart,20000);
 let _rz;addEventListener("resize",()=>{clearTimeout(_rz);_rz=setTimeout(drawChart,200);});

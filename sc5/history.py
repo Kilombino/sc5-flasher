@@ -37,7 +37,7 @@ def sample_from_snapshot(snap, now=None):
 class History:
     """Bounded, persisted series of samples. Thread-safe."""
 
-    def __init__(self, path=HISTORY, maxlen=1440, min_gap=15):
+    def __init__(self, path=HISTORY, maxlen=4320, min_gap=15):   # 24 h at 20 s
         self.path = path
         self.maxlen = maxlen
         self.min_gap = min_gap          # min seconds between stored samples
