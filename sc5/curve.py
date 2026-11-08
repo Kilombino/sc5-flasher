@@ -20,10 +20,17 @@ import threading
 from .control import FAN_MIN
 
 CONFIG = os.path.expanduser("~/.config/sc5-flasher/curve.json")
+
+# Hard safety: whatever curve the user sets, at/above this chip temp we force
+# 100% fans. This can't be edited away, so a gentle curve can never let the
+# chip climb with the fans low. The miner also protects itself independently
+# (firmware shuts the board down on overheat, cutoff 105 C chip / 89 C board).
+SAFE_MAX_C = 88
+
 DEFAULT = {
     "enabled": False,
-    # progressive: 50% up to 70 C, ramping to 100% by 85 C
-    "points": [[70, 50], [80, 75], [85, 100]],
+    # progressive, several intermediate steps
+    "points": [[62, 45], [70, 52], [76, 62], [80, 72], [84, 85], [88, 100]],
     "step": 5,
 }
 
@@ -98,10 +105,13 @@ def interp(temp_c, points):
 
 
 def target_pct(temp_c, cfg):
-    """The fan % to apply: interpolated, rounded to `step`, clamped to [FAN_MIN,100]."""
+    """The fan % to apply: interpolated, rounded to `step`, clamped to [FAN_MIN,100].
+    Above SAFE_MAX_C the fans are forced to 100% whatever the curve says."""
     raw = interp(temp_c, cfg["points"])
     if raw is None:
         return None
+    if temp_c is not None and temp_c >= SAFE_MAX_C:
+        return 100
     step = cfg.get("step", 5)
     pct = int(round(raw / step) * step)
     return max(FAN_MIN, min(100, pct))

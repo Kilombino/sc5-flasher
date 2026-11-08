@@ -26,6 +26,13 @@ class CurveInterp(unittest.TestCase):
         cfg = {"points": [[70, 40]], "step": 5}
         self.assertEqual(target_pct(50, cfg), 40)   # FAN_MIN
 
+    def test_safe_max_forces_full_fans(self):
+        # even a reckless "40% up to 95" curve goes 100% once the chip is hot
+        cfg = {"points": [[95, 40]], "step": 5}
+        self.assertEqual(target_pct(88, cfg), 100)
+        self.assertEqual(target_pct(92, cfg), 100)
+        self.assertEqual(target_pct(70, cfg), 40)
+
 
 class CurveClamp(unittest.TestCase):
     def test_points_sorted_and_monotonic(self):
