@@ -64,13 +64,14 @@ class HistoryBuffer(unittest.TestCase):
         self.assertEqual(h2.samples(), [[1, 10, 10, 70], [2, 11, 10, 71]])
 
     def test_rewrite_keeps_file_bounded(self):
-        h, path = self._hist(maxlen=3, min_gap=0)
-        for i in range(10):
+        h, path = self._hist(maxlen=8, min_gap=0)
+        bound = h.maxlen + h._flush_every
+        for i in range(200):                         # far more than maxlen
             h.add([i, i, i, 70])
-        with open(path) as fh:
-            lines = [ln for ln in fh if ln.strip()]
-        self.assertLessEqual(len(lines), 6)          # capped, not 10
-        self.assertEqual([r[0] for r in h.samples()], [7, 8, 9])
+            with open(path) as fh:
+                lines = [ln for ln in fh if ln.strip()]
+            self.assertLessEqual(len(lines), bound)  # file never grows past the cap
+        self.assertEqual([r[0] for r in h.samples()], list(range(192, 200)))
 
 
 if __name__ == "__main__":

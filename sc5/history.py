@@ -41,6 +41,11 @@ class History:
         self.path = path
         self.maxlen = maxlen
         self.min_gap = min_gap          # min seconds between stored samples
+        # The in-memory ring is hard-capped at maxlen. The file is append-only
+        # between rewrites; rewriting every maxlen//4 appends keeps it bounded to
+        # ~1.25*maxlen lines (a few hundred KB at the default), so it can never
+        # grow without limit.
+        self._flush_every = max(1, maxlen // 4)
         self.buf = deque(maxlen=maxlen)
         self.lock = threading.Lock()
         self._appends = 0
@@ -72,7 +77,7 @@ class History:
             with open(self.path, "a") as fh:
                 fh.write(json.dumps(sample) + "\n")
             self._appends += 1
-            if self._appends >= self.maxlen:   # keep the file from growing forever
+            if self._appends >= self._flush_every:   # keep the file bounded
                 self._rewrite()
         except OSError:
             pass
