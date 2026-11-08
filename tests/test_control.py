@@ -60,6 +60,54 @@ class ControlGuards(unittest.TestCase):
                 m.do("mode", "turbo")
         self.assertFalse(any(meth == "PUT" for meth, _ in calls))
 
+    def test_fan_max_changes_only_fan_digits(self):
+        captured = {}
+
+        def fake_request(path, method="GET", body=None, token=None):
+            if path.startswith("/user/login"):
+                return {"JWT Token": "tok"}
+            if path == "/mcb/setting" and method == "GET":
+                return {"select": 0, "manual": False,
+                        "manualPowerplan": "700 MHz 11750 V 30 RPM 30 RPM PV 11900",
+                        "ledcontrol": False, "tempcontrol": True, "powerplans": []}
+            if path == "/mcb/setting" and method == "PUT":
+                captured["body"] = body
+            return None
+
+        m = Miner("127.0.0.1", password="x")
+        with mock.patch.object(m, "_request", side_effect=fake_request):
+            m.do("fan", "max")
+        plan = captured["body"]["manualPowerplan"]
+        self.assertEqual(plan, "700 MHz 11750 V 100 RPM 100 RPM PV 11900")  # MHz/V untouched
+        self.assertIn("700 MHz", plan)
+        self.assertIn("11750 V", plan)
+        self.assertTrue(captured["body"]["manual"])
+
+    def test_fan_auto_restores_preset(self):
+        captured = {}
+
+        def fake_request(path, method="GET", body=None, token=None):
+            if path.startswith("/user/login"):
+                return {"JWT Token": "tok"}
+            if path == "/mcb/setting" and method == "GET":
+                return {"select": 0, "manual": True,
+                        "manualPowerplan": "700 MHz 11750 V 100 RPM 100 RPM PV 11900", "powerplans": []}
+            if path == "/mcb/setting" and method == "PUT":
+                captured["body"] = body
+            return None
+
+        m = Miner("127.0.0.1", password="x")
+        with mock.patch.object(m, "_request", side_effect=fake_request):
+            m.do("fan", "auto")
+        self.assertIs(captured["body"]["manual"], False)
+
+    def test_fan_bad_arg_rejected(self):
+        m = Miner("127.0.0.1", password="x")
+        with mock.patch.object(m, "_login", return_value="tok"), \
+             mock.patch.object(m, "_request", return_value={"manualPowerplan": "700 MHz 11750 V 30 RPM 30 RPM PV 11900"}):
+            with self.assertRaises(ControlError):
+                m.do("fan", "turbo")
+
     def test_reboot_puts_restart(self):
         calls = []
 

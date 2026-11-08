@@ -14,6 +14,7 @@ browser and never committed.
 
 import json
 import os
+import re
 import threading
 import urllib.parse
 import urllib.request
@@ -30,6 +31,7 @@ _WRITE_RESTART = "/mcb/restart"
 # Actions the panel may request. Each is a fixed, reversible operation.
 ACTIONS = {
     "mode",          # arg: "hash" | "eco" | "idle"  -> set power-plan level
+    "fan",           # arg: "max" | "auto"            -> fan % only, clock/voltage untouched
     "led",           # arg: bool                      -> identification LED
     "tempcontrol",   # arg: bool                      -> temperature-based fan control
     "reboot",        # no arg                         -> PUT /mcb/restart
@@ -118,6 +120,22 @@ class Miner:
                     raise ControlError(f"mode must be one of {sorted(MODE_LEVELS)}")
                 cfg["select"] = MODE_LEVELS[arg]
                 cfg["manual"] = False  # use the factory preset, not custom tuning
+            elif action == "fan":
+                # Raise/lower ONLY the fan %, keeping clock and voltage byte-identical
+                # to the active plan. More cooling can't brick; we never touch MHz/V.
+                if arg not in ("max", "auto"):
+                    raise ControlError("fan must be 'max' or 'auto'")
+                if arg == "auto":
+                    cfg["manual"] = False  # fans follow the selected preset + temp control
+                else:
+                    plan = cfg.get("manualPowerplan") or ""
+                    # replace the two "<n> RPM <n> RPM" fan fields with 100; leave the
+                    # rest (MHz, V, PV) exactly as-is. Refuse if the shape is unexpected.
+                    new_plan, n = re.subn(r"\d+\s*RPM\s+\d+\s*RPM", "100 RPM 100 RPM", plan, count=1)
+                    if n != 1:
+                        raise ControlError(f"Unexpected power-plan format: {plan!r}")
+                    cfg["manualPowerplan"] = new_plan
+                    cfg["manual"] = True
             elif action == "led":
                 cfg["ledcontrol"] = bool(arg)
             elif action == "tempcontrol":

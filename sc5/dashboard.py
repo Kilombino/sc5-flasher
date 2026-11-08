@@ -42,7 +42,8 @@ button.warn{border-color:var(--warn)}button.danger{border-color:var(--bad)}
 
 <div class="grid" id="kpi"></div>
 
-<div class="card"><table><thead><tr><th>Placa</th><th>Estado</th><th>TH/s</th><th>MHz</th><th>V</th><th>°C</th><th>Ventiladores</th><th>HW %</th></tr></thead><tbody id="boards"></tbody></table></div>
+<div class="card"><table><thead><tr><th>Placa</th><th>Estado</th><th>TH/s</th><th>MHz</th><th>V</th><th>Chip °C</th><th>Placa °C</th><th>Ventiladores</th><th>HW %</th></tr></thead><tbody id="boards"></tbody></table>
+<div class="mut" style="font-size:12px;margin-top:8px">«Chip» = sensor del ASIC (el que calienta). «Placa» = sensor de la placa, el que muestra el panel oficial de Goldshell.</div></div>
 
 <div id="controls" style="display:none">
 <h2>Control</h2>
@@ -53,6 +54,13 @@ button.warn{border-color:var(--warn)}button.danger{border-color:var(--bad)}
    <button data-mode="eco">Eco · 513 MHz</button>
    <button data-mode="idle" class="warn">Reposo · 0 MHz</button>
   </div>
+ </div>
+ <div class="row" style="margin-bottom:12px"><span class="lbl">Ventiladores</span>
+  <div class="seg" id="fans">
+   <button data-fan="auto">Auto</button>
+   <button data-fan="max">Máximo · 100%</button>
+  </div>
+  <span class="mut" id="fanpct" style="font-size:12px;margin-left:4px"></span>
  </div>
  <div class="row" style="margin-bottom:12px"><span class="lbl">Ventilador por temperatura</span>
   <button id="tempctl" data-act="tempcontrol">—</button>
@@ -87,13 +95,18 @@ async function tick(){
   document.getElementById("sub").textContent=`${d.miner||""} · encendido ${Math.floor(up/3600)} h ${Math.floor(up%3600/60)} min · ${s.algorithm||""} · ${s.power?.plan||""}`;
   const k=[["Hashrate 20 s",(su.ths_20s||0).toFixed(2)+" TH/s"],["Media",(su.ths_avg||0).toFixed(2)+" TH/s"],["Errores HW",(su.hw_pct??"?")+" %"],["Rechazadas",(su.reject_pct??"?")+" %"]];
   document.getElementById("kpi").innerHTML=k.map(([a,b])=>`<div class="card"><div class="mut">${a}</div><div class="big">${esc(b)}</div></div>`).join("");
-  document.getElementById("boards").innerHTML=(s.boards||[]).map(b=>`<tr><td>${esc(b.id)}</td><td class="${b.status==="Alive"?"o":"b"}">${esc(b.status)}</td><td>${b.ths_20s.toFixed(2)}</td><td>${esc(b.clock_mhz)}</td><td>${((b.voltage_mv||0)/1000).toFixed(2)}</td><td>${b.temps_c.map(t=>`<span class="${tc(t)}">${t.toFixed(0)}</span>`).join(" / ")}</td><td>${esc(b.fans_rpm.join(" "))}</td><td>${esc(b.hw_pct)}</td></tr>`).join("");
+  const cell=t=>t==null?"—":`<span class="${tc(t)}">${t.toFixed(0)}</span>`;
+  document.getElementById("boards").innerHTML=(s.boards||[]).map(b=>`<tr><td>${esc(b.id)}</td><td class="${b.status==="Alive"?"o":"b"}">${esc(b.status)}</td><td>${b.ths_20s.toFixed(2)}</td><td>${esc(b.clock_mhz)}</td><td>${((b.voltage_mv||0)/1000).toFixed(2)}</td><td>${cell(b.temp_chip_c)}</td><td>${cell(b.temp_board_c)}</td><td>${esc(b.fans_rpm.join(" "))}</td><td>${esc(b.hw_pct)}</td></tr>`).join("");
   document.getElementById("pools").innerHTML=(s.pools||[]).map(p=>`<tr><td>${p.active?"●":""}</td><td>${esc(p.url)}</td><td>${esc(p.user)}</td><td>${esc(p.status)}</td><td>${esc(p.accepted)}</td><td>${esc(p.rejected)}</td></tr>`).join("");
   document.getElementById("warn").innerHTML=[...(s.warnings||[]).map(w=>`<div class="w">⚠ ${esc(w)}</div>`),...(s.errors||[]).map(e=>`<div class="b">✖ ${esc(e)}</div>`)].join("");
   if(CONTROL){
    document.getElementById("controls").style.display="block";
    const sel=s.power?.select;lastMode=sel;
    document.querySelectorAll("#modes button").forEach(x=>x.classList.toggle("on",{hash:0,eco:2,idle:3}[x.dataset.mode]===sel));
+   const manual=!!s.power?.manual, pct=s.power?.fan_pct;
+   document.querySelector('#fans button[data-fan="max"]').classList.toggle("on",manual&&pct===100);
+   document.querySelector('#fans button[data-fan="auto"]').classList.toggle("on",!manual);
+   document.getElementById("fanpct").textContent=pct!=null?`plan: ${pct}%`:"";
    const tcb=document.getElementById("tempctl");tcb.textContent=s.power?.temp_control?"Activado":"Desactivado";tcb.classList.toggle("on",!!s.power?.temp_control);
    const led=document.getElementById("led");led.textContent=s.power?.led?"Encendido":"Apagado";led.classList.toggle("on",!!s.power?.led);
   }
@@ -112,6 +125,7 @@ async function send(action,arg,confirmMsg){
 function wire(){
  document.querySelectorAll("#modes button").forEach(b=>b.onclick=()=>send("mode",b.dataset.mode,
    b.dataset.mode==="idle"?"¿Poner el minero en REPOSO? Dejará de minar hasta que lo saques de reposo.":null));
+ document.querySelectorAll("#fans button").forEach(b=>b.onclick=()=>send("fan",b.dataset.fan,null));
  const tcb=document.getElementById("tempctl");tcb.onclick=()=>send("tempcontrol",!tcb.classList.contains("on"));
  const led=document.getElementById("led");led.onclick=()=>send("led",!led.classList.contains("on"));
  document.getElementById("reboot").onclick=()=>send("reboot",null,"¿Reiniciar el minero? Estará ~1-2 min sin minar y volverá solo.");

@@ -1,5 +1,6 @@
 """Turns raw API replies into one snapshot dict. Pure functions, easy to test."""
 
+import re
 import time
 
 KNOWN_MODEL = "Goldshell-SC5Pro"  # status.model starts with this ("Goldshell-SC5ProⅡ")
@@ -52,8 +53,12 @@ def build_snapshot(raw):
 
     boards = []
     for d in (raw.get("devs") or {}).get("DEVS") or []:
-        temps = [_num(d.get(k)) for k in ("tstemp-0", "tstemp-1", "tstemp-2")]
-        temps = [t for t in temps if t is not None]
+        # tstemp-0/1 are the two chip (ASIC) zones; tstemp-2 is the cooler board
+        # sensor. The stock panel shows only tstemp-2, which is why it reads lower.
+        chip_temps = [_num(d.get(k)) for k in ("tstemp-0", "tstemp-1")]
+        chip_temps = [t for t in chip_temps if t is not None]
+        board_temp = _num(d.get("tstemp-2"))
+        temps = [t for t in (_num(d.get("tstemp-0")), _num(d.get("tstemp-1")), board_temp) if t is not None]
         board = {
             "id": d.get("ID"),
             "status": d.get("Status"),
@@ -63,6 +68,8 @@ def build_snapshot(raw):
             "voltage_mv": _num(d.get("voltage")),
             "fans_rpm": [d.get(f"fan{i}") for i in range(4) if d.get(f"fan{i}") is not None],
             "temps_c": temps,
+            "temp_chip_c": max(chip_temps) if chip_temps else None,  # the hot one
+            "temp_board_c": board_temp,                              # what stock shows
             "temp_max_c": max(temps) if temps else None,
             "overheat": d.get("overheat"),
             "hw_pct": _num(d.get("Device Hardware%")),
@@ -92,10 +99,13 @@ def build_snapshot(raw):
     snap["pools"] = pools
 
     setting = raw.get("setting") or {}
+    plan = setting.get("manualPowerplan") or ""
+    fan_m = re.search(r"(\d+)\s*RPM", plan)
     snap["power"] = {
         "plan": setting.get("manualPowerplan"),
         "manual": setting.get("manual"),
         "select": setting.get("select"),
+        "fan_pct": int(fan_m.group(1)) if fan_m else None,  # fan % baked into the plan
         "led": setting.get("ledcontrol"),
         "temp_control": setting.get("tempcontrol"),
         "plans": [pl.get("info") for pl in setting.get("powerplans") or []],
