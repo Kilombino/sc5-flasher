@@ -207,7 +207,7 @@ async function send(action,arg,confirmMsg){
  finally{busy=false;document.querySelectorAll("button").forEach(b=>b.disabled=false);setTimeout(tick,1200);}
 }
 async function factory(){
- if(!confirm("¿Dejar el minero de fábrica?\n\nVentilador en Auto (curva del firmware, objetivo ~85 °C de chip, corte de seguridad a 105 °C) y se desactiva la curva propia."))return;
+ if(!confirm("¿Dejar el minero de fábrica? Ventilador en Auto (curva del firmware, objetivo ~85 °C de chip, corte de seguridad a 105 °C) y se desactiva la curva propia."))return;
  try{await curvePost({enabled:false});}catch(e){}
  send("fan","auto");
 }
