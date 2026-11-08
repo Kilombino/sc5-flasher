@@ -19,6 +19,9 @@ and-control tool for the SC5 Pro Ⅱ.
 
 - **Live dashboard:** hashrate (20 s and average), per-board TH/s, clock, voltage,
   chip vs board temperatures, fans and hardware-error %, and the pools.
+- **Hashrate graph:** a dependency-free canvas chart of recent hashrate (with the
+  average overlaid). A background sampler records history even with no browser
+  open, persisted so the graph survives a service restart.
 - **Controls** (with `--control`): power mode (Hash / Eco / Idle factory presets),
   fan floor (Auto / 50 / 75 / 100 %), identification LED, temperature fan control,
   and reboot.

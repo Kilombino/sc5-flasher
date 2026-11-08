@@ -14,6 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from .collect import collect
 from .control import ACTIONS, Miner, ControlError
 from . import curve as curvemod
+from .history import History, sample_from_snapshot
 
 PAGE = """<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>SC5 Pro II</title>
@@ -42,6 +43,10 @@ button.warn{border-color:var(--warn)}button.danger{border-color:var(--bad)}
 <h1 id="dev">SC5 Pro II</h1><div class="sub" id="sub">cargando…</div>
 
 <div class="grid" id="kpi"></div>
+
+<div class="card"><div class="row" style="justify-content:space-between;margin-bottom:6px">
+ <b>Hashrate</b><span class="mut" id="chartInfo" style="font-size:12px"></span></div>
+ <canvas id="chart" height="170" style="width:100%;display:block"></canvas></div>
 
 <div class="card"><table><thead><tr><th>Placa</th><th>Estado</th><th>TH/s</th><th>MHz</th><th>V</th><th>Chip °C</th><th>Placa °C</th><th>Ventiladores</th><th>HW %</th></tr></thead><tbody id="boards"></tbody></table>
 <div class="mut" style="font-size:12px;margin-top:8px">«Chip» = sensor del ASIC (el que calienta). «Placa» = sensor de la placa, el que muestra el panel oficial de Goldshell.</div></div>
@@ -100,6 +105,34 @@ button.warn{border-color:var(--warn)}button.danger{border-color:var(--bad)}
 <script>
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const tc=t=>t>=90?"b":t>=80?"w":"o";
+const cssv=n=>(getComputedStyle(document.documentElement).getPropertyValue(n)||"#888").trim();
+async function drawChart(){
+ const c=document.getElementById("chart");if(!c)return;
+ let data;try{data=(await (await fetch("api/history",{cache:"no-store"})).json()).samples||[];}catch(e){return;}
+ const dpr=window.devicePixelRatio||1,W=c.clientWidth||600,H=170;
+ c.width=W*dpr;c.height=H*dpr;const x=c.getContext("2d");x.scale(dpr,dpr);x.clearRect(0,0,W,H);
+ if(data.length<2){x.fillStyle=cssv("--mut");x.font="12px system-ui";x.fillText("Recogiendo datos…",10,22);document.getElementById("chartInfo").textContent="";return;}
+ const pad={l:42,r:8,t:10,b:18},t0=data[0][0],t1=data[data.length-1][0];
+ const ths=data.map(d=>d[1]),avg=data.map(d=>d[2]);
+ let mn=Math.min(...ths),mx=Math.max(...ths);
+ if(mx-mn<0.5){mx+=0.25;mn-=0.25;}const span=mx-mn;mn=Math.max(0,mn-span*0.12);mx+=span*0.12;
+ const px=t=>pad.l+(W-pad.l-pad.r)*(t1===t0?1:(t-t0)/(t1-t0));
+ const py=v=>pad.t+(H-pad.t-pad.b)*(1-(v-mn)/((mx-mn)||1));
+ x.strokeStyle=cssv("--line");x.fillStyle=cssv("--mut");x.font="11px system-ui";x.lineWidth=1;
+ for(let i=0;i<=3;i++){const v=mn+(mx-mn)*i/3,yy=py(v);x.beginPath();x.moveTo(pad.l,yy);x.lineTo(W-pad.r,yy);x.stroke();x.fillText(v.toFixed(1),4,yy+3);}
+ const line=(arr,base)=>{x.beginPath();let started=false;arr.forEach((d,i)=>{const v=base?d[1]:d[2];if(v==null){started=false;return;}const X=px(d[0]),Y=py(v);started?x.lineTo(X,Y):x.moveTo(X,Y);started=true;});};
+ // area under ths
+ x.beginPath();data.forEach((d,i)=>{const X=px(d[0]),Y=py(d[1]);i?x.lineTo(X,Y):x.moveTo(X,Y);});
+ x.lineTo(px(t1),py(mn));x.lineTo(px(t0),py(mn));x.closePath();
+ const g=x.createLinearGradient(0,pad.t,0,H-pad.b);g.addColorStop(0,"rgba(90,169,255,.28)");g.addColorStop(1,"rgba(90,169,255,0)");x.fillStyle=g;x.fill();
+ // avg (faint dashed)
+ x.save();x.setLineDash([4,4]);line(data,false);x.strokeStyle=cssv("--mut");x.lineWidth=1;x.stroke();x.restore();
+ // ths (main)
+ line(data,true);x.strokeStyle=cssv("--acc");x.lineWidth=1.8;x.stroke();
+ const last=ths[ths.length-1],mins=Math.round((t1-t0)/60);
+ const win=mins>=60?(mins/60).toFixed(1)+" h":mins+" min";
+ document.getElementById("chartInfo").textContent=`${last.toFixed(2)} TH/s · mín ${Math.min(...ths).toFixed(2)} · máx ${Math.max(...ths).toFixed(2)} · ${win}`;
+}
 const CONTROL=__CONTROL__;
 let busy=false,lastMode=null;
 function toast(m){const t=document.getElementById("toast");t.textContent=m;t.classList.add("show");clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove("show"),3500);}
@@ -178,6 +211,8 @@ function wireCurve(){
 }
 if(CONTROL)wire();
 tick();setInterval(tick,10000);
+drawChart();setInterval(drawChart,20000);
+let _rz;addEventListener("resize",()=>{clearTimeout(_rz);_rz=setTimeout(drawChart,200);});
 </script></body></html>"""
 
 
@@ -197,7 +232,7 @@ class _Cache:
             self.at = 0
 
 
-def serve(host, bind="127.0.0.1", port=8099, control=False):
+def serve(host, bind="127.0.0.1", port=8099, control=False, sample_interval=20):
     cache = _Cache(host)
     miner = Miner(host) if control else None
     page = PAGE.replace("__CONTROL__", "true" if control else "false")
@@ -206,6 +241,20 @@ def serve(host, bind="127.0.0.1", port=8099, control=False):
         supervisor = curvemod.Supervisor(miner, cache.get)
         if supervisor.cfg.get("enabled"):
             supervisor.start()
+
+    # Background hashrate sampler: records history even with no browser open,
+    # so the graph is continuous. Read-only; just reads the shared snapshot.
+    history = History()
+
+    def _sampler():
+        while True:
+            try:
+                history.add(sample_from_snapshot(cache.get()))
+            except Exception:
+                pass
+            time.sleep(sample_interval)
+
+    threading.Thread(target=_sampler, daemon=True).start()
 
     class H(BaseHTTPRequestHandler):
         def _send(self, code, body, ctype):
@@ -221,6 +270,8 @@ def serve(host, bind="127.0.0.1", port=8099, control=False):
                 self._send(200, page.encode(), "text/html; charset=utf-8")
             elif self.path == "/api/snapshot":
                 self._send(200, json.dumps(cache.get(), ensure_ascii=False).encode(), "application/json")
+            elif self.path == "/api/history":
+                self._send(200, json.dumps({"samples": history.samples()}).encode(), "application/json")
             elif self.path == "/api/curve" and control:
                 self._send(200, json.dumps(supervisor.state()).encode(), "application/json")
             else:
