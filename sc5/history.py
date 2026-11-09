@@ -1,6 +1,7 @@
 """Rolling hashrate history for the dashboard graph.
 
-Keeps a bounded series of ``[epoch_s, ths_20s, ths_avg, chip_temp_c]`` samples,
+Keeps a bounded series of ``[epoch_s, ths_20s, ths_avg, chip_temp_c, fan_rpm_avg]``
+samples (older 4-field rows lack the fan average and still load),
 persisted to a small JSONL file so the graph survives a service restart. Pure
 data: the dashboard samples it in the background and serves it to the page.
 """
@@ -15,7 +16,7 @@ HISTORY = os.path.expanduser("~/.config/sc5-flasher/history.jsonl")
 
 
 def sample_from_snapshot(snap, now=None):
-    """A compact ``[t, ths_20s, ths_avg, max_chip_temp]`` row from a snapshot.
+    """A compact ``[t, ths_20s, ths_avg, max_chip_temp, avg_fan_rpm]`` row from a snapshot.
 
     Returns None when there is no hashrate to record (e.g. the miner is
     unreachable), so a gap in the data is never stored as a fake zero.
@@ -28,10 +29,19 @@ def sample_from_snapshot(snap, now=None):
     temps = [b.get("temp_chip_c") for b in (snap or {}).get("boards", [])]
     temps = [t for t in temps if t is not None]
     temp = max(temps) if temps else None
+    # The SC5's fans are shared by all boards (each board reports the same four),
+    # so de-duplicate per fan position before averaging; 0 rpm = stopped, counts.
+    fans = {}
+    for b in (snap or {}).get("boards", []):
+        for i, r in enumerate(b.get("fans_rpm") or []):
+            if isinstance(r, (int, float)):
+                fans.setdefault(i, r)
+    fan = sum(fans.values()) / len(fans) if fans else None
     t = int(now if now is not None else time.time())
     return [t, round(ths, 3),
             round(avg, 3) if avg is not None else None,
-            round(temp, 1) if temp is not None else None]
+            round(temp, 1) if temp is not None else None,
+            round(fan) if fan is not None else None]
 
 
 class History:

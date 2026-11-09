@@ -19,7 +19,7 @@ from .history import History, sample_from_snapshot
 PAGE = """<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>SC5 Pro II</title>
 <style>
-:root{--bg:#0c0e13;--fg:#e8e8ea;--mut:#8b8f98;--card:#161922;--line:#262a33;--acc:#5aa9ff;--ok:#3fb950;--warn:#d29922;--bad:#f85149}
+:root{--bg:#0c0e13;--fg:#e8e8ea;--mut:#8b8f98;--card:#161922;--line:#262a33;--acc:#5aa9ff;--ok:#3fb950;--fan:#b18cff;--warn:#d29922;--bad:#f85149}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,-apple-system,sans-serif}
 main{max-width:1000px;margin:auto;padding:16px}
 h1{font-size:18px;margin:0 0 2px}.mut{color:var(--mut)}.sub{color:var(--mut);font-size:12px;margin-bottom:12px}
@@ -38,7 +38,10 @@ button.warn{border-color:var(--warn)}button.danger{border-color:var(--bad)}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}
 .seg button{border:0;border-radius:0;border-right:1px solid var(--line)}.seg button:last-child{border-right:0}
 .toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#20242e;border:1px solid var(--line);border-radius:9px;padding:10px 14px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw}
-.toast.show{opacity:1}.lbl{color:var(--mut);font-size:12px;margin-right:6px}
+.toast.show{opacity:1}
+.lg{cursor:pointer;user-select:none;font-size:12px;border:1px solid var(--line);border-radius:999px;padding:2px 9px}
+.lg.off{opacity:.38;text-decoration:line-through}
+.pm{padding:3px 8px;font-size:12px;border-radius:7px;margin-right:3px}.lbl{color:var(--mut);font-size:12px;margin-right:6px}
 </style></head><body><main>
 <h1 id="dev">SC5 Pro II</h1><div class="sub" id="sub">cargando…</div>
 
@@ -47,9 +50,9 @@ button.warn{border-color:var(--warn)}button.danger{border-color:var(--bad)}
 <div class="card">
  <div class="row" style="justify-content:space-between;gap:8px">
   <div class="row" style="gap:12px"><b>Hashrate</b>
-   <span style="color:var(--acc);font-size:12px"><b id="lvThs">—</b> TH/s</span>
-   <span class="mut" style="font-size:12px"><b id="lvAvg">—</b> media</span>
-   <span style="color:var(--warn);font-size:12px"><b id="lvTemp">—</b> chip °C</span>
+   <span class="lg" data-s="ths" title="Mostrar/ocultar" style="color:var(--acc)"><b id="lvThs">—</b> TH/s · <span class="mut"><b id="lvAvg">—</b> media</span></span>
+   <span class="lg" data-s="temp" title="Mostrar/ocultar" style="color:var(--warn)"><b id="lvTemp">—</b> chip °C</span>
+   <span class="lg" data-s="fan" title="Mostrar/ocultar" style="color:var(--fan)"><b id="lvFan">—</b> rpm ventiladores</span>
   </div>
   <div class="seg" id="chartWin">
    <button data-w="3600" class="on">1 h</button><button data-w="21600">6 h</button><button data-w="86400">24 h</button>
@@ -108,7 +111,8 @@ button.warn{border-color:var(--warn)}button.danger{border-color:var(--bad)}
 </div>
 
 <h2>Pools</h2>
-<div class="card"><table><thead><tr><th></th><th>Pool</th><th>Usuario</th><th>Estado</th><th>Acept.</th><th>Rech.</th></tr></thead><tbody id="pools"></tbody></table></div>
+<div class="card"><table><thead><tr><th></th><th>Pool</th><th>Usuario</th><th>Estado</th><th>Acept.</th><th>Rech.</th><th class="pc" style="display:none">Prioridad</th></tr></thead><tbody id="pools"></tbody></table>
+<div class="mut pc" style="font-size:12px;margin-top:8px;display:none">El minero mina en el primer pool vivo de la lista; los demás son de reserva, por orden. Subir uno arriba del todo cambia dónde mina (lo mismo que arrastrarlo en el panel de Goldshell).</div></div>
 
 <div id="warn" style="margin-top:12px"></div>
 <p class="mut" style="margin-top:18px">Solo acciones reversibles y de fábrica. Nunca firmware ni reset de fábrica.</p>
@@ -119,6 +123,8 @@ const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&g
 const tc=t=>t>=90?"b":t>=80?"w":"o";
 const cssv=n=>(getComputedStyle(document.documentElement).getPropertyValue(n)||"#888").trim();
 let chartWin=3600;
+const SHOW={ths:true,temp:true,fan:true};
+try{Object.assign(SHOW,JSON.parse(localStorage.getItem("sc5show")||"{}"));}catch(e){}
 const hhmm=t=>{const d=new Date(t*1000);return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");};
 async function drawChart(){
  const c=document.getElementById("chart");if(!c)return;
@@ -135,6 +141,9 @@ async function drawChart(){
  const PX=W-pad.l-pad.r,PY=H-pad.t-pad.b;
  const ths=data.map(d=>d[1]).filter(v=>v!=null);
  const temps=data.map(d=>d[3]).filter(v=>v!=null);
+ const fans=data.map(d=>d[4]).filter(v=>v!=null);
+ let fmn=fans.length?Math.min(...fans):0,fmx=fans.length?Math.max(...fans):1;
+ if(fmx-fmn<200){fmx+=100;fmn-=100;}fmn=Math.max(0,fmn-100);fmx+=100;
  let mn=Math.min(...ths),mx=Math.max(...ths);
  if(mx-mn<0.5){mx+=0.25;mn-=0.25;}let sp=mx-mn;mn=Math.max(0,mn-sp*0.12);mx+=sp*0.12;
  let tmn=temps.length?Math.min(...temps):60,tmx=temps.length?Math.max(...temps):90;
@@ -142,32 +151,52 @@ async function drawChart(){
  const px=t=>pad.l+PX*Math.max(0,Math.min(1,(t-x0)/((x1-x0)||1)));
  const py=v=>pad.t+PY*(1-(v-mn)/((mx-mn)||1));
  const pyt=v=>pad.t+PY*(1-(v-tmn)/((tmx-tmn)||1));
+ const pyf=v=>pad.t+PY*(1-(v-fmn)/((fmx-fmn)||1));
  // horizontal grid + left (TH/s) axis
  x.font="11px system-ui";x.lineWidth=1;
- for(let i=0;i<=3;i++){const v=mn+(mx-mn)*i/3,yy=py(v);x.strokeStyle=cssv("--line");x.beginPath();x.moveTo(pad.l,yy);x.lineTo(W-pad.r,yy);x.stroke();x.fillStyle=cssv("--mut");x.textAlign="right";x.fillText(v.toFixed(1),pad.l-4,yy+3);}
- // right (°C) axis labels
- x.fillStyle=cssv("--warn");x.textAlign="left";
- for(let i=0;i<=3;i++){const v=tmn+(tmx-tmn)*i/3;x.fillText(v.toFixed(0)+"°",W-pad.r+4,pyt(v)+3);}
+ for(let i=0;i<=3;i++){const yy=pad.t+PY*(1-i/3);x.strokeStyle=cssv("--line");x.beginPath();x.moveTo(pad.l,yy);x.lineTo(W-pad.r,yy);x.stroke();}
+ // left axis: TH/s; when hashrate is hidden it shows the fans' rpm instead
+ x.textAlign="right";
+ if(SHOW.ths){x.fillStyle=cssv("--mut");for(let i=0;i<=3;i++){const v=mn+(mx-mn)*i/3;x.fillText(v.toFixed(1),pad.l-4,py(v)+3);}}
+ else if(SHOW.fan&&fans.length){x.fillStyle=cssv("--fan");for(let i=0;i<=3;i++){const v=fmn+(fmx-fmn)*i/3;x.fillText((v/1000).toFixed(1)+"k",pad.l-4,pyf(v)+3);}}
+ // right axis: °C; when temperature is hidden it shows the fans' rpm
+ x.textAlign="left";
+ if(SHOW.temp){x.fillStyle=cssv("--warn");for(let i=0;i<=3;i++){const v=tmn+(tmx-tmn)*i/3;x.fillText(v.toFixed(0)+"°",W-pad.r+4,pyt(v)+3);}}
+ else if(SHOW.fan&&fans.length&&SHOW.ths){x.fillStyle=cssv("--fan");for(let i=0;i<=3;i++){const v=fmn+(fmx-fmn)*i/3;x.fillText((v/1000).toFixed(1)+"k",W-pad.r+4,pyf(v)+3);}}
  // x axis (hours)
  const N=W<520?3:6;x.fillStyle=cssv("--mut");x.textAlign="center";
  for(let i=0;i<=N;i++){const t=x0+(x1-x0)*i/N,X=px(t);x.strokeStyle=cssv("--line");x.globalAlpha=.5;x.beginPath();x.moveTo(X,pad.t);x.lineTo(X,H-pad.b);x.stroke();x.globalAlpha=1;x.fillText(hhmm(t),X,H-6);}
- const draw=idx=>{x.beginPath();let on=false;data.forEach(d=>{const v=d[idx];if(v==null){on=false;return;}const X=px(d[0]),Y=idx===3?pyt(v):py(v);on?x.lineTo(X,Y):x.moveTo(X,Y);on=true;});};
- // area under ths
- x.beginPath();let on=false;data.forEach(d=>{const X=px(d[0]),Y=py(d[1]);on?x.lineTo(X,Y):x.moveTo(X,Y);on=true;});
- x.lineTo(px(data[data.length-1][0]),py(mn));x.lineTo(px(data[0][0]),py(mn));x.closePath();
- const g=x.createLinearGradient(0,pad.t,0,H-pad.b);g.addColorStop(0,"rgba(90,169,255,.28)");g.addColorStop(1,"rgba(90,169,255,0)");x.fillStyle=g;x.fill();
+ const draw=idx=>{x.beginPath();let on=false;data.forEach(d=>{const v=d[idx];if(v==null){on=false;return;}const X=px(d[0]),Y=idx===3?pyt(v):idx===4?pyf(v):py(v);on?x.lineTo(X,Y):x.moveTo(X,Y);on=true;});};
+ if(SHOW.ths){
+  // area under ths
+  x.beginPath();let on=false;data.forEach(d=>{const X=px(d[0]),Y=py(d[1]);on?x.lineTo(X,Y):x.moveTo(X,Y);on=true;});
+  x.lineTo(px(data[data.length-1][0]),py(mn));x.lineTo(px(data[0][0]),py(mn));x.closePath();
+  const g=x.createLinearGradient(0,pad.t,0,H-pad.b);g.addColorStop(0,"rgba(90,169,255,.28)");g.addColorStop(1,"rgba(90,169,255,0)");x.fillStyle=g;x.fill();
+ }
+ // fans' average rpm (own scale)
+ if(SHOW.fan&&fans.length){draw(4);x.strokeStyle=cssv("--fan");x.lineWidth=1.3;x.stroke();}
  // chip temp (right axis)
- draw(3);x.strokeStyle=cssv("--warn");x.lineWidth=1.4;x.stroke();
- // avg (faint dashed)
- x.save();x.setLineDash([4,4]);draw(2);x.strokeStyle=cssv("--mut");x.lineWidth=1;x.stroke();x.restore();
- // ths (main)
- draw(1);x.strokeStyle=cssv("--acc");x.lineWidth=1.8;x.stroke();
- const last=ths[ths.length-1],lt=temps.length?temps[temps.length-1]:null;
- info.textContent=`${last.toFixed(2)} TH/s · mín ${Math.min(...ths).toFixed(2)} · máx ${Math.max(...ths).toFixed(2)}`+(lt!=null?` · chip ${lt.toFixed(0)}°`:"");
+ if(SHOW.temp){draw(3);x.strokeStyle=cssv("--warn");x.lineWidth=1.4;x.stroke();}
+ if(SHOW.ths){
+  // avg (faint dashed)
+  x.save();x.setLineDash([4,4]);draw(2);x.strokeStyle=cssv("--mut");x.lineWidth=1;x.stroke();x.restore();
+  // ths (main)
+  draw(1);x.strokeStyle=cssv("--acc");x.lineWidth=1.8;x.stroke();
+ }
+ const last=ths[ths.length-1],lt=temps.length?temps[temps.length-1]:null,lf=fans.length?fans[fans.length-1]:null;
+ info.textContent=`${last.toFixed(2)} TH/s · mín ${Math.min(...ths).toFixed(2)} · máx ${Math.max(...ths).toFixed(2)}`+(lt!=null?` · chip ${lt.toFixed(0)}°`:"")+(lf!=null?` · ventiladores ${lf} rpm (${Math.min(...fans)}–${Math.max(...fans)})`:"");
 }
+function wireLegend(){document.querySelectorAll(".lg").forEach(e=>{const k=e.dataset.s;e.classList.toggle("off",!SHOW[k]);e.onclick=()=>{SHOW[k]=!SHOW[k];e.classList.toggle("off",!SHOW[k]);try{localStorage.setItem("sc5show",JSON.stringify(SHOW));}catch(_){}drawChart();};});}
 function wireChartWin(){document.querySelectorAll("#chartWin button").forEach(b=>b.onclick=()=>{chartWin=+b.dataset.w;document.querySelectorAll("#chartWin button").forEach(o=>o.classList.toggle("on",o===b));drawChart();});}
 const CONTROL=__CONTROL__;
-let busy=false,lastMode=null;
+let busy=false,lastMode=null,lastPools=[];
+function movePool(i,m){
+ const p=lastPools[i];if(!p)return;
+ const j=m==="top"?0:m==="up"?i-1:i+1;
+ let msg=`¿Cambiar la prioridad de ${p.url}?\n\nPara aplicarla el minero se reinicia: estará ~2-3 min sin minar.`;
+ if(j===0||i===0){const nt=j===0?p:lastPools[1];msg+=`\n\nCAMBIA EL POOL DONDE MINA:\nAhora: ${lastPools[0].url}\nPasará a: ${nt.url} (si está vivo)\n\nSi es un alquiler o un mercado, el comprador dejará de recibir el hashrate.`;}
+ send("pool",{url:p.url,move:m},msg);
+}
 function toast(m){const t=document.getElementById("toast");t.textContent=m;t.classList.add("show");clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove("show"),3500);}
 async function tick(){
  try{
@@ -180,10 +209,16 @@ async function tick(){
   document.getElementById("kpi").innerHTML=k.map(([a,b])=>`<div class="card"><div class="mut">${a}</div><div class="big">${esc(b)}</div></div>`).join("");
   const _ct=(s.boards||[]).map(b=>b.temp_chip_c).filter(v=>v!=null),_mt=_ct.length?Math.max(..._ct):null;
   const lv=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
+  const _f={};(s.boards||[]).forEach(b=>(b.fans_rpm||[]).forEach((r,i)=>{if(typeof r==="number"&&!(i in _f))_f[i]=r;}));const _fv=Object.values(_f);
+  lv("lvFan",_fv.length?Math.round(_fv.reduce((a,b)=>a+b,0)/_fv.length):"—");
   lv("lvThs",(su.ths_20s||0).toFixed(2));lv("lvAvg",(su.ths_avg||0).toFixed(2));lv("lvTemp",_mt!=null?_mt.toFixed(0):"—");
   const cell=t=>t==null?"—":`<span class="${tc(t)}">${t.toFixed(0)}</span>`;
   document.getElementById("boards").innerHTML=(s.boards||[]).map(b=>`<tr><td>${esc(b.id)}</td><td class="${b.status==="Alive"?"o":"b"}">${esc(b.status)}</td><td>${b.ths_20s.toFixed(2)}</td><td>${esc(b.clock_mhz)}</td><td>${((b.voltage_mv||0)/1000).toFixed(2)}</td><td>${cell(b.temp_chip_c)}</td><td>${cell(b.temp_board_c)}</td><td>${esc(b.fans_rpm.join(" "))}</td><td>${esc(b.hw_pct)}</td></tr>`).join("");
-  document.getElementById("pools").innerHTML=(s.pools||[]).map(p=>`<tr><td>${p.active?"●":""}</td><td>${esc(p.url)}</td><td>${esc(p.user)}</td><td>${esc(p.status)}</td><td>${esc(p.accepted)}</td><td>${esc(p.rejected)}</td></tr>`).join("");
+  const _pl=[...(s.pools||[])].sort((a,b)=>(a.priority??0)-(b.priority??0));lastPools=_pl;
+  const mv=(i,m,t,dis)=>`<button class="pm" data-i="${i}" data-m="${m}" title="${t}"${dis?" disabled":""}>${{top:"⇈",up:"↑",down:"↓"}[m]}</button>`;
+  document.getElementById("pools").innerHTML=_pl.map((p,i)=>`<tr><td>${p.active?"●":""}</td><td>${esc(p.url)}</td><td>${esc(p.user)}</td><td>${esc(p.status)}</td><td>${esc(p.accepted)}</td><td>${esc(p.rejected)}</td>`+
+   (CONTROL?`<td class="pc" style="white-space:nowrap">${mv(i,"top","Arriba del todo (minar aquí)",i===0)}${mv(i,"up","Subir",i===0)}${mv(i,"down","Bajar",i===_pl.length-1)}</td>`:"")+`</tr>`).join("");
+  if(CONTROL){document.querySelectorAll(".pc").forEach(e=>e.style.display="");document.querySelectorAll("#pools .pm").forEach(b=>b.onclick=()=>movePool(+b.dataset.i,b.dataset.m));}
   document.getElementById("warn").innerHTML=[...(s.warnings||[]).map(w=>`<div class="w">⚠ ${esc(w)}</div>`),...(s.errors||[]).map(e=>`<div class="b">✖ ${esc(e)}</div>`)].join("");
   if(CONTROL){
    document.getElementById("controls").style.display="block";
@@ -250,7 +285,7 @@ function wireCurve(){
  curveRefresh();setInterval(curveRefresh,5000);
 }
 if(CONTROL)wire();
-wireChartWin();
+wireChartWin();wireLegend();
 tick();setInterval(tick,10000);
 drawChart();setInterval(drawChart,20000);
 let _rz;addEventListener("resize",()=>{clearTimeout(_rz);_rz=setTimeout(drawChart,200);});

@@ -29,12 +29,14 @@ The controls and the software fan curve:
 
 - **Live dashboard:** hashrate (20 s and average), per-board TH/s, clock, voltage,
   chip vs board temperatures, fans and hardware-error %, and the pools.
-- **Hashrate graph:** a dependency-free canvas chart of recent hashrate (with the
-  average overlaid). A background sampler records history even with no browser
-  open, persisted so the graph survives a service restart.
+- **Graph:** a dependency-free canvas chart of recent hashrate (with the average
+  overlaid), chip temperature and the fans' average speed. Click a legend entry to
+  show or hide that series (remembered in the browser). A background sampler
+  records history even with no browser open, persisted so the graph survives a
+  service restart.
 - **Controls** (with `--control`): power mode (Hash / Eco / Idle factory presets),
   fan floor (Auto / 50 / 75 / 100 %), identification LED, temperature fan control,
-  and reboot.
+  reboot, and **pool priority** (move a pool to the top, up or down).
 - **Software fan curve:** a list of `chip °C → fan %` points; the fan ramps up and
   down on its own, interpolating between points. A hard override forces 100 % fans
   above a safety temperature, whatever the curve says.
@@ -68,6 +70,22 @@ python3 -m sc5 serve 192.168.1.50 --control --bind 0.0.0.0   # reach it from you
 The panel has no login of its own, so bind it to `127.0.0.1` or a trusted LAN,
 never to the Internet. The password is read from `secrets.env`, never from the
 browser and never committed.
+
+### Pool priority
+
+The miner mines on the first live pool of its list and keeps the rest as failover,
+in order. The ⇈ / ↑ / ↓ buttons reorder that list exactly like dragging a row in the
+stock web UI: the panel reads the miner's own pool list, moves one entry, renumbers
+`pool-priority` and sends the same list back (`PUT /mcb/pools`). URLs, workers and
+passwords go back unchanged; pools are never added or removed (`newpool` /
+`delpool` stay blocked). Moving a pool to the top switches mining to it, and the
+panel asks first.
+
+A pool change only restarts the miner's mining process (also from the stock UI),
+and on the SC5 Pro II the hash boards do not come back from that: chip sensors stay
+at -60 °C and the hashrate near zero. So after saving the new order the panel does a
+full reboot, which brings the boards back with the new order in about 2 minutes. The
+panel says so before every change.
 
 ### Software fan curve
 

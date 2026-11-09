@@ -13,7 +13,7 @@ SNAP = {
 class SampleFromSnapshot(unittest.TestCase):
     def test_extracts_row(self):
         row = sample_from_snapshot(SNAP, now=1000)
-        self.assertEqual(row, [1000, 13.84, 14.1, 83.0])  # temp = max chip
+        self.assertEqual(row, [1000, 13.84, 14.1, 83.0, None])  # temp = max chip
 
     def test_none_when_no_hashrate(self):
         self.assertIsNone(sample_from_snapshot({"summary": {}}, now=1))
@@ -21,7 +21,18 @@ class SampleFromSnapshot(unittest.TestCase):
 
     def test_tolerates_missing_avg_and_temps(self):
         row = sample_from_snapshot({"summary": {"ths_20s": 5}, "boards": []}, now=2)
-        self.assertEqual(row, [2, 5, None, None])
+        self.assertEqual(row, [2, 5, None, None, None])
+
+    def test_fan_average_dedups_shared_fans(self):
+        fans = [3720, 3780, 3900, 3900]
+        snap = {"summary": {"ths_20s": 14},
+                "boards": [{"temp_chip_c": 74, "fans_rpm": fans} for _ in range(4)]}
+        self.assertEqual(sample_from_snapshot(snap, now=3)[4], 3825)
+
+    def test_fan_average_counts_a_stopped_fan(self):
+        snap = {"summary": {"ths_20s": 14},
+                "boards": [{"temp_chip_c": 74, "fans_rpm": [4000, 0]}]}
+        self.assertEqual(sample_from_snapshot(snap, now=4)[4], 2000)
 
 
 class HistoryBuffer(unittest.TestCase):

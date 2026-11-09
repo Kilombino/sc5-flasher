@@ -162,5 +162,84 @@ class ControlGuards(unittest.TestCase):
         self.assertIn(("PUT", "/mcb/restart"), calls)
 
 
+def _pools():
+    return [
+        {"url": "stratum+tcp://a.example:1", "user": "wa", "pass": "pa", "legal": True,
+         "active": True, "dragid": 0, "pool-priority": 0},
+        {"url": "stratum+tcp://b.example:2", "user": "wb", "pass": "pb", "legal": True,
+         "active": False, "dragid": 1, "pool-priority": 1},
+        {"url": "stratum+tcp://c.example:3", "user": "wc", "pass": "pc", "legal": True,
+         "active": False, "dragid": 2, "pool-priority": 2},
+    ]
+
+
+class PoolOrder(unittest.TestCase):
+    def _run(self, arg, pools=None):
+        calls = []
+        src = _pools() if pools is None else pools
+
+        def fake_request(path, method="GET", body=None, token=None):
+            calls.append((method, path, body))
+            if path.startswith("/user/login"):
+                return {"JWT Token": "tok"}
+            if path == "/mcb/pools" and method == "GET":
+                return [dict(p) for p in src]
+            return None
+
+        m = Miner("127.0.0.1", password="x")
+        with mock.patch.object(m, "_request", side_effect=fake_request):
+            out = m.do("pool", arg)
+        return out, [c for c in calls if c[0] == "PUT"]
+
+    def test_move_to_top_reorders_and_renumbers(self):
+        out, writes = self._run({"url": "stratum+tcp://c.example:3", "move": "top"})
+        self.assertTrue(out["ok"])
+        self.assertEqual([w[1] for w in writes], ["/mcb/pools", "/mcb/restart"])
+        _, path, body = writes[0]
+        self.assertEqual([p["url"][14] for p in body], ["c", "a", "b"])
+        self.assertEqual([p["pool-priority"] for p in body], [0, 1, 2])
+
+    def test_everything_but_priority_is_sent_back_unchanged(self):
+        _, writes = self._run({"url": "stratum+tcp://b.example:2", "move": "down"})
+        body = writes[0][2]
+        original = {p["url"]: p for p in _pools()}
+        for p in body:
+            o = dict(original[p["url"]])
+            o.pop("pool-priority")
+            q = dict(p)
+            q.pop("pool-priority")
+            self.assertEqual(q, o)   # user, pass, dragid, flags byte-identical
+        self.assertEqual(len(body), 3)  # nothing added or removed
+
+    def test_up_and_bottom(self):
+        _, w = self._run({"url": "stratum+tcp://b.example:2", "move": "up"})
+        self.assertEqual([p["url"][14] for p in w[0][2]], ["b", "a", "c"])
+        _, w = self._run({"url": "stratum+tcp://a.example:1", "move": "bottom"})
+        self.assertEqual([p["url"][14] for p in w[0][2]], ["b", "c", "a"])
+
+    def test_order_follows_priority_not_list_position(self):
+        shuffled = list(reversed(_pools()))
+        _, w = self._run({"url": "stratum+tcp://b.example:2", "move": "up"}, pools=shuffled)
+        self.assertEqual([p["url"][14] for p in w[0][2]], ["b", "a", "c"])
+
+    def test_no_write_when_already_there(self):
+        out, writes = self._run({"url": "stratum+tcp://a.example:1", "move": "top"})
+        self.assertTrue(out["ok"])
+        self.assertEqual(writes, [])
+
+    def test_bad_args_never_write(self):
+        for arg in (None, "top", {"url": "stratum+tcp://a.example:1", "move": "delete"},
+                    {"url": "stratum+tcp://nope:9", "move": "top"}, {"move": "top"}):
+            with self.assertRaises(ControlError):
+                self._run(arg)
+
+    def test_duplicate_or_weird_lists_refused(self):
+        dup = _pools() + [dict(_pools()[0], **{"pool-priority": 3})]
+        with self.assertRaises(ControlError):
+            self._run({"url": "stratum+tcp://a.example:1", "move": "down"}, pools=dup)
+        with self.assertRaises(ControlError):
+            self._run({"url": "x", "move": "top"}, pools=[])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -43,6 +43,10 @@ def _fan_pct(arg):
 _READ = "/mcb/setting"
 _WRITE_SETTING = "/mcb/setting"
 _WRITE_RESTART = "/mcb/restart"
+_POOLS = "/mcb/pools"   # GET list / PUT the same list reordered (what the stock UI's drag does)
+
+POOL_MOVES = ("top", "up", "down", "bottom")
+MAX_POOLS = 10
 
 # Actions the panel may request. Each is a fixed, reversible operation.
 ACTIONS = {
@@ -51,6 +55,7 @@ ACTIONS = {
     "led",           # arg: bool                      -> identification LED
     "tempcontrol",   # arg: bool                      -> temperature-based fan control
     "reboot",        # no arg                         -> PUT /mcb/restart
+    "pool",          # arg: {"url": str, "move": top|up|down|bottom} -> reorder pool priority
 }
 
 # Paths that must never be reachable from here, as a second line of defence.
@@ -127,6 +132,9 @@ class Miner:
                 self._token = None  # miner reboots; token will be reissued next time
                 return {"ok": True, "note": "Reinicio enviado; vuelve en ~1-2 min."}
 
+            if action == "pool":
+                return self._move_pool(arg, token)
+
             cfg = self._request(_READ, method="GET", token=token)
             if not isinstance(cfg, dict):
                 raise ControlError("Could not read current settings.")
@@ -168,3 +176,46 @@ class Miner:
 
             self._request(_WRITE_SETTING, method="PUT", body=cfg, token=token)
             return {"ok": True, "applied": action, "arg": arg}
+
+
+    def _move_pool(self, arg, token):
+        """Reorder the failover list, exactly like dragging a row in the stock UI:
+        read the device's own pool list, move ONE entry, renumber pool-priority and
+        PUT the same list back. URLs, users and passwords are sent back byte-identical;
+        no pool is ever added or removed (newpool/delpool stay forbidden). The miner
+        mines on the first live pool, so moving one to the top switches to it.
+
+        Then a FULL reboot (PUT /mcb/restart). On this miner a pool change only
+        restarts the mining process and the hash boards do not come back from that
+        (seen 2026-11-09: chip sensors stuck at -60 C, ~0 TH/s for minutes); a full
+        reboot brings them back in ~2 min with the new order kept."""
+        if not isinstance(arg, dict):
+            raise ControlError("pool needs {'url': ..., 'move': ...}")
+        url, move = arg.get("url"), arg.get("move")
+        if not isinstance(url, str) or not url:
+            raise ControlError("pool url missing")
+        if move not in POOL_MOVES:
+            raise ControlError(f"move must be one of {list(POOL_MOVES)}")
+        pools = self._request(_POOLS, method="GET", token=token)
+        if not isinstance(pools, list) or not pools or len(pools) > MAX_POOLS:
+            raise ControlError("Unexpected pool list from the miner.")
+        if not all(isinstance(p, dict) and isinstance(p.get("url"), str) for p in pools):
+            raise ControlError("Unexpected pool entry from the miner.")
+        pools = sorted(pools, key=lambda p: p.get("pool-priority", 0))
+        idx = [i for i, p in enumerate(pools) if p["url"] == url]
+        if len(idx) != 1:
+            raise ControlError("Pool not found (or listed twice); reload the panel.")
+        i = idx[0]
+        j = {"top": 0, "up": max(0, i - 1), "down": min(len(pools) - 1, i + 1),
+             "bottom": len(pools) - 1}[move]
+        if i == j:
+            return {"ok": True, "note": "Ya estaba ahí."}
+        entry = pools.pop(i)
+        pools.insert(j, entry)
+        for n, p in enumerate(pools):
+            p["pool-priority"] = n
+        self._request(_POOLS, method="PUT", body=pools, token=token)
+        self._request(_WRITE_RESTART, method="PUT", body={}, token=token)
+        self._token = None  # miner reboots; token will be reissued next time
+        return {"ok": True, "applied": "pool", "order": [p["url"] for p in pools],
+                "note": "Orden guardado; el minero se reinicia (~2-3 min sin minar)."}
