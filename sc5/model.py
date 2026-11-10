@@ -108,12 +108,13 @@ def build_snapshot(raw):
     snap["pools"] = pools
 
     setting = raw.get("setting") or {}
-    plan = setting.get("manualPowerplan") or ""
-    fan_m = re.search(r"(\d+)\s*RPM", plan)
+    # The plan actually running: the custom one when manual, else the selected preset.
+    running = (setting.get("manualPowerplan") if setting.get("manual") else
+               (_preset_info(setting) or setting.get("manualPowerplan"))) or ""
+    # fan % of the RUNNING plan (in Auto the stored custom plan is not in use)
+    fan_m = re.search(r"(\d+)\s*RPM", running)
     snap["power"] = {
-        # The plan actually running: the custom one when manual, else the selected preset.
-        "plan": setting.get("manualPowerplan") if setting.get("manual") else
-                (_preset_info(setting) or setting.get("manualPowerplan")),
+        "plan": running or None,
         "manual": setting.get("manual"),
         "select": setting.get("select"),          # index into powerplans
         "level": selected_level(setting),         # 0 hash, 2 eco, 3 idle
