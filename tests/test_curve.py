@@ -105,3 +105,31 @@ class DownHysteresisTests(unittest.TestCase):
         from sc5.curve import hold_target
         cfg = dict(self.CFG, down_hyst=0)
         self.assertEqual(hold_target(80, cfg, 75), 70)
+
+
+class TargetModeTests(unittest.TestCase):
+    CFG = {"points": [[70, 50], [80, 72], [84, 85], [88, 100]], "step": 1,
+           "mode": "target", "target_c": 80, "adjust_s": 60}
+
+    def test_holds_at_target(self):
+        from sc5.curve import target_step
+        self.assertEqual(target_step(80, self.CFG, 72, 999), (72, False))
+
+    def test_one_percent_moves_rate_limited(self):
+        from sc5.curve import target_step
+        self.assertEqual(target_step(81, self.CFG, 72, 999), (73, True))
+        self.assertEqual(target_step(79, self.CFG, 72, 999), (71, True))
+        self.assertEqual(target_step(81, self.CFG, 72, 10), (72, False))
+
+    def test_rescue_and_safety(self):
+        from sc5.curve import target_step
+        # 3 C over target: jump to the curve floor at once, ignoring the rate limit
+        pct, adj = target_step(83, self.CFG, 60, 5)
+        self.assertTrue(adj); self.assertGreaterEqual(pct, 81)
+        self.assertEqual(target_step(88, self.CFG, 60, 5), (100, True))
+        self.assertEqual(target_step(None, self.CFG, 60, 999), (60, False))
+
+    def test_floor_and_start(self):
+        from sc5.curve import target_step, FAN_MIN
+        self.assertEqual(target_step(70, self.CFG, FAN_MIN, 999), (FAN_MIN, True))
+        self.assertEqual(target_step(80, self.CFG, None, None), (72, True))

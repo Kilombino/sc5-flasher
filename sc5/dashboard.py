@@ -94,6 +94,12 @@ button.warn{border-color:var(--warn)}button.danger{border-color:var(--bad)}
    <button id="curveToggle">—</button>
    <span id="curveState" style="font-size:22px;font-weight:700;margin-left:6px"></span>
   </div>
+  <div class="row" style="margin-bottom:8px"><span class="lbl">Modo</span>
+   <div class="seg" id="curveMode"><button data-cm="target">Mantener temperatura</button><button data-cm="curve">Seguir los puntos</button></div>
+   <span id="targetBox">chip a <input type="number" id="targetC" min="65" max="85" style="width:56px"> °C, 1 % cada <input type="number" id="adjustS" min="20" max="600" step="10" style="width:64px"> s <button id="targetSave">Guardar</button></span>
+   <span id="stepBox">paso <input type="number" id="curveStep" min="1" max="10" style="width:48px"> %</span>
+  </div>
+  <div class="mut" id="targetHelp" style="font-size:12px;margin-bottom:8px">Mantener temperatura: si el chip pasa del objetivo sube el ventilador 1 %, si baja de él lo baja 1 %, como mucho una vez por intervalo. Si el chip llega a 3 °C por encima del objetivo salta directamente a lo que diga la curva de puntos, y a 88 °C pone el 100 %.</div>
   <div class="mut" style="font-size:12px;margin-bottom:8px">Puntos chip °C → ventilador %. Entre puntos el ventilador sube/baja solo, interpolando. Nunca toca frecuencia ni voltaje.</div>
   <table style="width:auto"><thead><tr><th>Chip °C</th><th>Ventilador %</th><th></th></tr></thead><tbody id="curveRows"></tbody></table>
   <div class="row" style="margin-top:8px">
@@ -277,7 +283,12 @@ async function curveRefresh(){
   const on=!!s.cfg.enabled;const t=document.getElementById("curveToggle");
   t.textContent=on?"Activada":"Desactivada";t.classList.toggle("on",on);
   if(!curveEditing){const tb=document.getElementById("curveRows");tb.innerHTML="";(s.cfg.points||[]).forEach(([a,b])=>tb.appendChild(curveRow(a,b)));}
-  document.getElementById("curveState").textContent=on?`${s.applied!=null?s.applied+" %":"—"} · chip ${s.last_temp!=null?s.last_temp.toFixed(0)+" °C":"—"}${s.last_error?" · "+s.last_error:""}`:"";
+  const tm=s.cfg.mode==="target";
+  document.querySelectorAll("#curveMode button").forEach(b=>b.classList.toggle("on",b.dataset.cm===s.cfg.mode));
+  document.getElementById("targetBox").style.display=tm?"":"none";document.getElementById("targetHelp").style.display=tm?"":"none";
+  document.getElementById("stepBox").style.display=tm?"none":"";
+  if(!curveEditing){document.getElementById("targetC").value=s.cfg.target_c;document.getElementById("adjustS").value=s.cfg.adjust_s;document.getElementById("curveStep").value=s.cfg.step;}
+  document.getElementById("curveState").textContent=on?`${s.applied!=null?s.applied+" %":"—"} · chip ${s.last_temp!=null?s.last_temp.toFixed(0)+" °C":"—"}${tm?" → objetivo "+s.cfg.target_c+" °C":""}${s.last_error?" · "+s.last_error:""}`:"";
  }catch(e){}
 }
 async function curvePost(cfg){
@@ -287,7 +298,10 @@ async function curvePost(cfg){
 function wireCurve(){
  document.getElementById("curveToggle").onclick=()=>curvePost({enabled:!(curveCfg&&curveCfg.enabled)});
  document.getElementById("curveAdd").onclick=()=>{curveEditing=true;document.getElementById("curveRows").appendChild(curveRow(75,75));};
- document.getElementById("curveSave").onclick=()=>curvePost({points:readPoints()});
+ document.getElementById("curveSave").onclick=()=>curvePost({points:readPoints(),step:+document.getElementById("curveStep").value});
+ document.querySelectorAll("#curveMode button").forEach(b=>b.onclick=()=>curvePost({mode:b.dataset.cm}));
+ document.getElementById("targetSave").onclick=()=>curvePost({target_c:+document.getElementById("targetC").value,adjust_s:+document.getElementById("adjustS").value});
+ ["targetC","adjustS","curveStep"].forEach(id=>document.getElementById(id).addEventListener("focus",()=>curveEditing=true));
  curveRefresh();setInterval(curveRefresh,5000);
 }
 if(CONTROL)wire();
@@ -367,7 +381,7 @@ def serve(host, bind="127.0.0.1", port=8099, control=False, sample_interval=20):
                 length = int(self.headers.get("Content-Length", 0))
                 req = json.loads(self.rfile.read(length) or b"{}")
                 if self.path == "/api/curve":
-                    cfg = {k: req[k] for k in ("enabled", "points", "step") if k in req}
+                    cfg = {k: req[k] for k in ("enabled", "points", "step", "down_hyst", "mode", "target_c", "adjust_s") if k in req}
                     state = supervisor.update(cfg)
                     cache.invalidate()
                     self._send(200, json.dumps(state).encode(), "application/json")

@@ -16,6 +16,7 @@ fans ramp up and down on their own, smoothly, without spamming the miner.
 import json
 import os
 import threading
+import time
 
 from .control import FAN_MIN
 
@@ -36,6 +37,12 @@ DEFAULT = {
     # where the lower % would apply. Without it a chip sitting on a rounding
     # boundary (e.g. 80/81 C) flips 70%<->75% every few seconds: a saw tooth.
     "down_hyst": 2,
+    # "curve": follow the points. "target": hold the chip at target_c by nudging
+    # the fan 1 % at a time (at most every adjust_s seconds); the curve stays as
+    # an emergency floor 3 C above the target.
+    "mode": "curve",
+    "target_c": 80,
+    "adjust_s": 60,
 }
 
 
@@ -61,6 +68,9 @@ def _clamp(cfg):
     cfg["enabled"] = bool(cfg.get("enabled"))
     cfg["step"] = max(1, min(10, int(cfg.get("step", 5))))
     cfg["down_hyst"] = max(0, min(5, int(cfg.get("down_hyst", 2))))
+    cfg["mode"] = "target" if cfg.get("mode") == "target" else "curve"
+    cfg["target_c"] = max(65, min(85, int(cfg.get("target_c", 80))))
+    cfg["adjust_s"] = max(20, min(600, int(cfg.get("adjust_s", 60))))
     cfg["points"] = _clamp_points(cfg.get("points") or DEFAULT["points"])
     return cfg
 
@@ -135,6 +145,34 @@ def hold_target(temp_c, cfg, current):
     return target
 
 
+TARGET_RESCUE_C = 3   # this far above target, jump straight to the curve
+
+
+def target_step(temp_c, cfg, current, since_adjust):
+    """Thermostat mode: returns (pct, adjusted). Holds `current` while the chip
+    sits at target_c; +1 % if hotter, -1 % if cooler, at most once every
+    adjust_s seconds. Never below the curve once the chip is TARGET_RESCUE_C
+    over target, and 100 % at SAFE_MAX_C."""
+    if temp_c is None:
+        return current, False
+    if temp_c >= SAFE_MAX_C:
+        return 100, True
+    if current is None:
+        return target_pct(temp_c, cfg), True
+    tgt = cfg.get("target_c", 80)
+    if temp_c >= tgt + TARGET_RESCUE_C:
+        floor = target_pct(temp_c, cfg) or current
+        if floor > current:
+            return min(100, floor), True
+    if since_adjust is not None and since_adjust < cfg.get("adjust_s", 60):
+        return current, False
+    if temp_c > tgt:
+        return min(100, current + 1), True
+    if temp_c < tgt:
+        return max(FAN_MIN, current - 1), True
+    return current, False
+
+
 def max_chip_temp(snapshot):
     temps = [b.get("temp_chip_c") for b in snapshot.get("boards", [])]
     temps = [t for t in temps if t is not None]
@@ -177,6 +215,7 @@ class Supervisor:
         self.applied = None
         self.last_temp = None
         self.last_error = None
+        self._last_adjust = None
         self._stop = threading.Event()
         self._thread = None
         self._lock = threading.Lock()
@@ -191,6 +230,7 @@ class Supervisor:
         with self._lock:
             self.cfg = save({**self.cfg, **cfg})
             self.applied = None
+            self._last_adjust = None
         if self.cfg.get("enabled"):
             self.start()
         else:
@@ -225,7 +265,14 @@ class Supervisor:
                 temp = max_chip_temp(snap)
                 actual = current_fan_pct(snap)
                 ref = actual if actual is not None else self.applied
-                target = hold_target(temp, cfg, ref)
+                if cfg.get("mode") == "target":
+                    now = time.monotonic()
+                    since = None if self._last_adjust is None else now - self._last_adjust
+                    target, adjusted = target_step(temp, cfg, ref, since)
+                    if adjusted:
+                        self._last_adjust = now
+                else:
+                    target = hold_target(temp, cfg, ref)
                 with self._lock:
                     self.last_temp = temp
                 if target is not None:
