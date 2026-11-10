@@ -208,10 +208,10 @@ async function tick(){
   const d=s.device||{},su=s.summary||{};
   document.getElementById("dev").textContent=`${d.model||"?"} · fw ${d.firmware||"?"} · ${d.board||"?"}`;
   const up=su.uptime_s||0;
-  document.getElementById("sub").textContent=`${d.miner||""} · encendido ${Math.floor(up/3600)} h ${Math.floor(up%3600/60)} min · ${s.algorithm||""} · ${s.power?.plan||""}`;
+  document.getElementById("sub").textContent=`${d.miner||""} · encendido ${Math.floor(up/3600)} h ${Math.floor(up%3600/60)} min · ${s.algorithm||""} · ${s.power?.level===3&&!s.power?.manual?"Reposo (0 MHz)":(s.power?.plan||"")}`;
   const _f={};(s.boards||[]).forEach(b=>(b.fans_rpm||[]).forEach((r,i)=>{if(typeof r==="number"&&!(i in _f))_f[i]=r;}));const _fv=Object.values(_f);
   const _fa=_fv.length?Math.round(_fv.reduce((a,b)=>a+b,0)/_fv.length):null;
-  const k=[["Hashrate 20 s",(su.ths_20s||0).toFixed(2)+" TH/s"],["Ventiladores (media)",_fa!=null?_fa+" rpm":(s.power?.level===3&&!s.power?.manual?"sin lectura (reposo)":"—")],["Errores HW",(su.hw_pct??"?")+" %"],["Rechazadas",(su.reject_pct??"?")+" %"]];
+  const k=[["Hashrate 20 s",(su.ths_20s||0).toFixed(2)+" TH/s"],["Ventiladores (media)",_fa!=null?_fa+" rpm":(s.power?.level===3&&!s.power?.manual?"— · reposo":"—")],["Errores HW",(su.hw_pct??"?")+" %"],["Rechazadas",(su.reject_pct??"?")+" %"]];
   document.getElementById("kpi").innerHTML=k.map(([a,b])=>`<div class="card"><div class="mut">${a}</div><div class="big">${esc(b)}</div></div>`).join("");
   const _ct=(s.boards||[]).map(b=>b.temp_chip_c).filter(v=>v!=null),_mt=_ct.length?Math.max(..._ct):null;
   const lv=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
