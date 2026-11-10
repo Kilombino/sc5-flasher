@@ -208,6 +208,12 @@ function movePool(i,m){
  send("pool",{url:p.url,move:m},msg);
 }
 function toast(m){const t=document.getElementById("toast");t.textContent=m;t.classList.add("show");clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove("show"),3500);}
+// temperature colour: light blue at/below cool, orange at warm, intense red at hot
+function tcol(t,cool,warm,hot){if(t==null)return"var(--mut)";
+ const P=[[cool,150,200,255],[warm,255,140,0],[hot,225,0,0]];
+ if(t<=P[0][0])return`rgb(${P[0].slice(1)})`;if(t>=P[2][0])return`rgb(${P[2].slice(1)})`;
+ const [x,y]=t<=P[1][0]?[P[0],P[1]]:[P[1],P[2]],f=(t-x[0])/((y[0]-x[0])||1),m=i=>Math.round(x[i]+(y[i]-x[i])*f);
+ return`rgb(${m(1)},${m(2)},${m(3)})`;}
 async function tick(){
  try{
   const s=await (await fetch("api/snapshot",{cache:"no-store"})).json();
@@ -220,8 +226,10 @@ async function tick(){
   const _fpc=s.power?.fan_pct,_fp=_fpc==null?"":(s.power?.manual?`al ${_fpc} %`:`auto · mín ${_fpc} %`);
   const _avg=a=>{a=a.filter(v=>typeof v==="number");return a.length?(a.reduce((x,y)=>x+y,0)/a.length).toFixed(1):null;};
   const _tc=_avg((s.boards||[]).map(b=>b.temp_chip_c)),_tb=_avg((s.boards||[]).map(b=>b.temp_board_c));
-  const k=[["Hashrate 20 s",(su.ths_20s||0).toFixed(2)+" TH/s"],["Ventiladores (media)",_fa!=null?_fa+" rpm":(s.power?.level===3&&!s.power?.manual?"— · reposo":"—"),_fa!=null?_fp:""],["Temperatura chip (media)",_tc!=null?`${_tc} °C`:"—",_tb!=null?`placa ${_tb} °C`:"","var(--temp)"],["Errores HW",(su.hw_pct??"?")+" %"],["Rechazadas",(su.reject_pct??"?")+" %"]];
-  document.getElementById("kpi").innerHTML=k.map(([a,b,c,col])=>`<div class="card"><div class="mut">${a}</div><div class="big">${esc(b)}</div>${c?`<div style="font-size:17px;font-weight:700;white-space:nowrap;color:${col||"var(--fan)"};margin-top:2px">${esc(c)}</div>`:""}</div>`).join("");
+  const k=[["Hashrate 20 s",(su.ths_20s||0).toFixed(2)+" TH/s"],["Ventiladores (media)",_fa!=null?_fa+" rpm":(s.power?.level===3&&!s.power?.manual?"— · reposo":"—"),_fa!=null?_fp:""],["Errores HW",(su.hw_pct??"?")+" %"],["Rechazadas",(su.reject_pct??"?")+" %"]];
+  const _tcard=`<div class="card"><div class="mut">Temperatura media</div><div class="big" style="white-space:nowrap;font-size:24px;color:${tcol(_tc==null?null:+_tc,75,85,90)}">chip ${_tc??"—"} °C</div><div style="font-size:17px;font-weight:700;white-space:nowrap;color:${tcol(_tb==null?null:+_tb,65,80,89)}">placas ${_tb??"—"} °C</div></div>`;
+  const _cards=k.map(([a,b,c,col])=>`<div class="card"><div class="mut">${a}</div><div class="big">${esc(b)}</div>${c?`<div style="font-size:17px;font-weight:700;white-space:nowrap;color:${col||"var(--fan)"};margin-top:2px">${esc(c)}</div>`:""}</div>`);
+  _cards.splice(2,0,_tcard);document.getElementById("kpi").innerHTML=_cards.join("");
   const _ct=(s.boards||[]).map(b=>b.temp_chip_c).filter(v=>v!=null),_mt=_ct.length?Math.max(..._ct):null;
   const lv=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
   lv("lvFan",_fa!=null?_fa:"—");
