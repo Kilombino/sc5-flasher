@@ -21,5 +21,14 @@ def collect(host):
         except Exception as exc:
             errors.append(f"web {path}: {exc}")
     snap = build_snapshot(raw)
+    pw = snap.get("power") or {}
+    snap["notes"] = []
+    if pw.get("level") == 3 and not pw.get("manual"):
+        # Idle: the firmware stops cgminer, so its API refusing connections is expected.
+        cg = [e for e in errors if e.startswith("cgminer ")]
+        if cg:
+            errors = [e for e in errors if not e.startswith("cgminer ")]
+            snap["notes"].append("En reposo el minero para cgminer: no hay lecturas de "
+                                 "hashrate, temperatura ni ventiladores hasta elegir Hash o Eco.")
     snap["errors"] = errors
     return snap

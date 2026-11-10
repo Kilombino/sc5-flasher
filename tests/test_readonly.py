@@ -72,6 +72,42 @@ class Parsing(unittest.TestCase):
         self.assertEqual(s["boards"], [])
         self.assertTrue(s["errors"])
 
+class IdleCollectTests(unittest.TestCase):
+    def test_idle_hides_expected_cgminer_errors(self):
+        from unittest import mock
+        from sc5 import collect as c
+
+        def cg(host, cmd):
+            raise ConnectionRefusedError(111, "Connection refused")
+
+        def web(host, path):
+            if path == "/mcb/setting":
+                return {"select": 2, "manual": False,
+                        "powerplans": [{"level": 0}, {"level": 2}, {"level": 3}]}
+            return {}
+
+        with mock.patch.object(c.api, "cgminer", cg), mock.patch.object(c.api, "web_get", web):
+            snap = c.collect("x")
+        self.assertEqual(snap["errors"], [])
+        self.assertEqual(len(snap["notes"]), 1)
+
+    def test_errors_kept_when_not_idle(self):
+        from unittest import mock
+        from sc5 import collect as c
+
+        def cg(host, cmd):
+            raise ConnectionRefusedError(111, "Connection refused")
+
+        def web(host, path):
+            if path == "/mcb/setting":
+                return {"select": 0, "manual": False,
+                        "powerplans": [{"level": 0}, {"level": 2}, {"level": 3}]}
+            return {}
+
+        with mock.patch.object(c.api, "cgminer", cg), mock.patch.object(c.api, "web_get", web):
+            snap = c.collect("x")
+        self.assertEqual(len(snap["errors"]), 4)
+
 
 if __name__ == "__main__":
     unittest.main()

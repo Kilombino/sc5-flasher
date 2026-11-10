@@ -224,7 +224,7 @@ async function tick(){
   document.getElementById("pools").innerHTML=_pl.map((p,i)=>`<tr><td>${p.active?"●":""}</td><td>${esc(p.url)}</td><td>${esc(p.user)}</td><td>${esc(p.status)}</td><td>${esc(p.accepted)}</td><td>${esc(p.rejected)}</td>`+
    (CONTROL?`<td class="pc" style="white-space:nowrap">${mv(i,"top","Arriba del todo (minar aquí)",i===0)}${mv(i,"up","Subir",i===0)}${mv(i,"down","Bajar",i===_pl.length-1)}</td>`:"")+`</tr>`).join("");
   if(CONTROL){document.querySelectorAll(".pc").forEach(e=>e.style.display="");document.querySelectorAll("#pools .pm").forEach(b=>b.onclick=()=>movePool(+b.dataset.i,b.dataset.m));}
-  document.getElementById("warn").innerHTML=[...(s.warnings||[]).map(w=>`<div class="w">⚠ ${esc(w)}</div>`),...(s.errors||[]).map(e=>`<div class="b">✖ ${esc(e)}</div>`)].join("");
+  document.getElementById("warn").innerHTML=[...(s.notes||[]).map(n=>`<div class="mut">ℹ ${esc(n)}</div>`),...(s.warnings||[]).map(w=>`<div class="w">⚠ ${esc(w)}</div>`),...(s.errors||[]).map(e=>`<div class="b">✖ ${esc(e)}</div>`)].join("");
   if(CONTROL){
    document.getElementById("controls").style.display="block";
    const sel=s.power?.level;lastMode=sel;
