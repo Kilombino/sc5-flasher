@@ -1,6 +1,15 @@
 """Turns raw API replies into one snapshot dict. Pure functions, easy to test."""
 
 import re
+from .control import selected_level
+
+
+def _preset_info(setting):
+    plans = setting.get("powerplans") or []
+    sel = setting.get("select")
+    if isinstance(sel, int) and 0 <= sel < len(plans) and isinstance(plans[sel], dict):
+        return plans[sel].get("info")
+    return None
 import time
 
 KNOWN_MODEL = "Goldshell-SC5Pro"  # status.model starts with this ("Goldshell-SC5ProⅡ")
@@ -102,9 +111,12 @@ def build_snapshot(raw):
     plan = setting.get("manualPowerplan") or ""
     fan_m = re.search(r"(\d+)\s*RPM", plan)
     snap["power"] = {
-        "plan": setting.get("manualPowerplan"),
+        # The plan actually running: the custom one when manual, else the selected preset.
+        "plan": setting.get("manualPowerplan") if setting.get("manual") else
+                (_preset_info(setting) or setting.get("manualPowerplan")),
         "manual": setting.get("manual"),
-        "select": setting.get("select"),
+        "select": setting.get("select"),          # index into powerplans
+        "level": selected_level(setting),         # 0 hash, 2 eco, 3 idle
         "fan_pct": int(fan_m.group(1)) if fan_m else None,  # fan % baked into the plan
         "led": setting.get("ledcontrol"),
         "temp_control": setting.get("tempcontrol"),

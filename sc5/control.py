@@ -21,7 +21,27 @@ import urllib.request
 
 # Power-plan levels the stock firmware ships (from /mcb/setting -> powerplans).
 # Only factory presets: no custom clock/voltage, which is where tuning can overheat.
+# NOTE: /mcb/setting "select" is the INDEX into "powerplans", not the level (the
+# stock web UI uses the index too). On the SC5 Pro II the list is levels [0, 2, 3],
+# so idle is select=2; writing select=3 was silently ignored. Use plan_index().
 MODE_LEVELS = {"hash": 0, "eco": 2, "idle": 3}
+
+
+def plan_index(cfg, level):
+    """Index in cfg["powerplans"] of the factory plan with this level, or None."""
+    for i, pl in enumerate(cfg.get("powerplans") or []):
+        if isinstance(pl, dict) and pl.get("level") == level:
+            return i
+    return None
+
+
+def selected_level(cfg):
+    """Level of the plan the firmware has selected (select is an index), or None."""
+    plans = cfg.get("powerplans") or []
+    sel = cfg.get("select")
+    if isinstance(sel, int) and 0 <= sel < len(plans) and isinstance(plans[sel], dict):
+        return plans[sel].get("level")
+    return None
 
 # The panel's fan buttons; any integer % in [FAN_MIN, 100] is accepted (the
 # software curve uses arbitrary floors). Floor of 40 so cooling is never starved
@@ -142,7 +162,10 @@ class Miner:
             if action == "mode":
                 if arg not in MODE_LEVELS:
                     raise ControlError(f"mode must be one of {sorted(MODE_LEVELS)}")
-                cfg["select"] = MODE_LEVELS[arg]
+                idx = plan_index(cfg, MODE_LEVELS[arg])
+                if idx is None:
+                    raise ControlError(f"This firmware has no factory plan for {arg!r}.")
+                cfg["select"] = idx
                 cfg["manual"] = False  # use the factory preset, not custom tuning
                 # Keep the firmware's thermal ramp ON as a backstop: a bare preset
                 # (Hash runs only 30% fans) must never sit without temperature
@@ -161,6 +184,11 @@ class Miner:
                     # ramp — exactly how the chips reached 90 C on 2026-11-08.
                     cfg["tempcontrol"] = True
                 else:
+                    # A fixed fan % switches to the custom (manual) plan, which mines at
+                    # 700 MHz. In idle that would silently wake the miner up, so refuse.
+                    if not cfg.get("manual") and selected_level(cfg) == MODE_LEVELS["idle"]:
+                        raise ControlError("The miner is idle (fans already 100%); "
+                                           "pick Hash or Eco first.")
                     pct = 100 if arg == "max" else _fan_pct(arg)
                     plan = cfg.get("manualPowerplan") or ""
                     new_plan, n = re.subn(r"\d+\s*RPM\s+\d+\s*RPM",

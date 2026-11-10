@@ -200,6 +200,10 @@ class Supervisor:
                 if not cfg.get("enabled"):
                     break
                 snap = self.snapshot_fn()
+                pw = (snap or {}).get("power") or {}
+                if not pw.get("manual") and pw.get("level") == 3:
+                    self._stop.wait(self.interval)   # avoid a busy loop when applied is None
+                    continue   # idle: fans are already 100% and a fan write would wake it
                 temp = max_chip_temp(snap)
                 actual = current_fan_pct(snap)
                 target = target_pct(temp, cfg)

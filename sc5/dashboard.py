@@ -222,7 +222,7 @@ async function tick(){
   document.getElementById("warn").innerHTML=[...(s.warnings||[]).map(w=>`<div class="w">⚠ ${esc(w)}</div>`),...(s.errors||[]).map(e=>`<div class="b">✖ ${esc(e)}</div>`)].join("");
   if(CONTROL){
    document.getElementById("controls").style.display="block";
-   const sel=s.power?.select;lastMode=sel;
+   const sel=s.power?.level;lastMode=sel;
    document.querySelectorAll("#modes button").forEach(x=>x.classList.toggle("on",{hash:0,eco:2,idle:3}[x.dataset.mode]===sel));
    const manual=!!s.power?.manual, pct=s.power?.fan_pct;
    document.querySelectorAll('#fans button').forEach(x=>{const f=x.dataset.fan;x.classList.toggle("on",f==="auto"?!manual:(manual&&String(pct)===f));});
