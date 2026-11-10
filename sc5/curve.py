@@ -32,6 +32,10 @@ DEFAULT = {
     # progressive, several intermediate steps
     "points": [[62, 45], [70, 52], [76, 62], [80, 72], [84, 85], [88, 100]],
     "step": 5,
+    # Lower the fan only once the chip is this many degrees below the point
+    # where the lower % would apply. Without it a chip sitting on a rounding
+    # boundary (e.g. 80/81 C) flips 70%<->75% every few seconds: a saw tooth.
+    "down_hyst": 2,
 }
 
 
@@ -56,6 +60,7 @@ def _clamp_points(points):
 def _clamp(cfg):
     cfg["enabled"] = bool(cfg.get("enabled"))
     cfg["step"] = max(1, min(10, int(cfg.get("step", 5))))
+    cfg["down_hyst"] = max(0, min(5, int(cfg.get("down_hyst", 2))))
     cfg["points"] = _clamp_points(cfg.get("points") or DEFAULT["points"])
     return cfg
 
@@ -115,6 +120,19 @@ def target_pct(temp_c, cfg):
     step = cfg.get("step", 5)
     pct = int(round(raw / step) * step)
     return max(FAN_MIN, min(100, pct))
+
+
+def hold_target(temp_c, cfg, current):
+    """`target_pct` with downward hysteresis: going UP is immediate (safety),
+    going DOWN from `current` only if the chip is also `down_hyst` degrees
+    cooler. Otherwise keep `current`."""
+    target = target_pct(temp_c, cfg)
+    if target is None or current is None or target >= current:
+        return target
+    hyst = cfg.get("down_hyst", 2)
+    if hyst and target_pct(temp_c + hyst, cfg) >= current:
+        return current
+    return target
 
 
 def max_chip_temp(snapshot):
@@ -206,7 +224,8 @@ class Supervisor:
                     continue   # idle: fans are already 100% and a fan write would wake it
                 temp = max_chip_temp(snap)
                 actual = current_fan_pct(snap)
-                target = target_pct(temp, cfg)
+                ref = actual if actual is not None else self.applied
+                target = hold_target(temp, cfg, ref)
                 with self._lock:
                     self.last_temp = temp
                 if target is not None:

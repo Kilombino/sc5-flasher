@@ -92,7 +92,7 @@ button.warn{border-color:var(--warn)}button.danger{border-color:var(--bad)}
  <div class="card" style="background:#12151c;border-color:var(--line)">
   <div class="row" style="margin-bottom:8px"><b>Curva propia</b>
    <button id="curveToggle">—</button>
-   <span class="mut" id="curveState" style="font-size:12px"></span>
+   <span id="curveState" style="font-size:22px;font-weight:700;margin-left:6px"></span>
   </div>
   <div class="mut" style="font-size:12px;margin-bottom:8px">Puntos chip °C → ventilador %. Entre puntos el ventilador sube/baja solo, interpolando. Nunca toca frecuencia ni voltaje.</div>
   <table style="width:auto"><thead><tr><th>Chip °C</th><th>Ventilador %</th><th></th></tr></thead><tbody id="curveRows"></tbody></table>
@@ -211,8 +211,9 @@ async function tick(){
   document.getElementById("sub").textContent=`${d.miner||""} · encendido ${Math.floor(up/3600)} h ${Math.floor(up%3600/60)} min · ${s.algorithm||""} · ${s.power?.level===3&&!s.power?.manual?"Reposo (0 MHz)":(s.power?.plan||"")}`;
   const _f={};(s.boards||[]).forEach(b=>(b.fans_rpm||[]).forEach((r,i)=>{if(typeof r==="number"&&!(i in _f))_f[i]=r;}));const _fv=Object.values(_f);
   const _fa=_fv.length?Math.round(_fv.reduce((a,b)=>a+b,0)/_fv.length):null;
-  const k=[["Hashrate 20 s",(su.ths_20s||0).toFixed(2)+" TH/s"],["Ventiladores (media)",_fa!=null?_fa+" rpm":(s.power?.level===3&&!s.power?.manual?"— · reposo":"—")],["Errores HW",(su.hw_pct??"?")+" %"],["Rechazadas",(su.reject_pct??"?")+" %"]];
-  document.getElementById("kpi").innerHTML=k.map(([a,b])=>`<div class="card"><div class="mut">${a}</div><div class="big">${esc(b)}</div></div>`).join("");
+  const _fpc=s.power?.fan_pct,_fp=_fpc==null?"":(s.power?.manual?`al ${_fpc} %`:`auto · mín ${_fpc} %`);
+  const k=[["Hashrate 20 s",(su.ths_20s||0).toFixed(2)+" TH/s"],["Ventiladores (media)",_fa!=null?_fa+" rpm":(s.power?.level===3&&!s.power?.manual?"— · reposo":"—"),_fa!=null?_fp:""],["Errores HW",(su.hw_pct??"?")+" %"],["Rechazadas",(su.reject_pct??"?")+" %"]];
+  document.getElementById("kpi").innerHTML=k.map(([a,b,c])=>`<div class="card"><div class="mut">${a}</div><div class="big">${esc(b)}</div>${c?`<div style="font-size:20px;font-weight:700;color:#b89cff;margin-top:2px">${esc(c)}</div>`:""}</div>`).join("");
   const _ct=(s.boards||[]).map(b=>b.temp_chip_c).filter(v=>v!=null),_mt=_ct.length?Math.max(..._ct):null;
   const lv=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
   lv("lvFan",_fa!=null?_fa:"—");
@@ -276,7 +277,7 @@ async function curveRefresh(){
   const on=!!s.cfg.enabled;const t=document.getElementById("curveToggle");
   t.textContent=on?"Activada":"Desactivada";t.classList.toggle("on",on);
   if(!curveEditing){const tb=document.getElementById("curveRows");tb.innerHTML="";(s.cfg.points||[]).forEach(([a,b])=>tb.appendChild(curveRow(a,b)));}
-  document.getElementById("curveState").textContent=on?`· ahora ${s.applied!=null?s.applied+"%":"—"} (chip ${s.last_temp!=null?s.last_temp.toFixed(0)+"°":"—"})${s.last_error?" · "+s.last_error:""}`:"";
+  document.getElementById("curveState").textContent=on?`${s.applied!=null?s.applied+" %":"—"} · chip ${s.last_temp!=null?s.last_temp.toFixed(0)+" °C":"—"}${s.last_error?" · "+s.last_error:""}`:"";
  }catch(e){}
 }
 async function curvePost(cfg){

@@ -82,3 +82,26 @@ class CurveReboot(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DownHysteresisTests(unittest.TestCase):
+    CFG = {"points": [[78, 68], [80, 72], [82, 78]], "step": 5, "down_hyst": 2}
+
+    def test_boundary_does_not_saw_tooth(self):
+        from sc5.curve import hold_target
+        # 81 C -> 75 %; dropping back to 80 C (-> 70 %) must keep 75 %
+        self.assertEqual(hold_target(81, self.CFG, 70), 75)
+        self.assertEqual(hold_target(80, self.CFG, 75), 75)
+        # only 2 C cooler than where 70 % applies does it come down
+        self.assertEqual(hold_target(78, self.CFG, 75), 70)
+
+    def test_up_is_immediate_and_none_passthrough(self):
+        from sc5.curve import hold_target
+        self.assertEqual(hold_target(82, self.CFG, 70), 80)
+        self.assertEqual(hold_target(80, self.CFG, None), 70)
+        self.assertIsNone(hold_target(None, self.CFG, 70))
+
+    def test_zero_hyst_behaves_like_target(self):
+        from sc5.curve import hold_target
+        cfg = dict(self.CFG, down_hyst=0)
+        self.assertEqual(hold_target(80, cfg, 75), 70)
