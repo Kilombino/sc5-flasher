@@ -19,7 +19,7 @@ from .history import History, sample_from_snapshot
 PAGE = """<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>SC5 Pro II</title>
 <style>
-:root{--bg:#0c0e13;--fg:#e8e8ea;--mut:#8b8f98;--card:#161922;--line:#262a33;--acc:#5aa9ff;--ok:#3fb950;--fan:#b18cff;--warn:#d29922;--bad:#f85149}
+:root{--bg:#0c0e13;--fg:#e8e8ea;--mut:#8b8f98;--card:#161922;--line:#262a33;--acc:#5aa9ff;--ok:#3fb950;--fan:#4ea1ff;--ths:#f2c94c;--temp:#ff5c5c;--warn:#d29922;--bad:#f85149}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,-apple-system,sans-serif}
 main{max-width:1000px;margin:auto;padding:16px}
 h1{font-size:18px;margin:0 0 2px}.mut{color:var(--mut)}.sub{color:var(--mut);font-size:12px;margin-bottom:12px}
@@ -50,8 +50,8 @@ button.warn{border-color:var(--warn)}button.danger{border-color:var(--bad)}
 <div class="card">
  <div class="row" style="justify-content:space-between;gap:8px">
   <div class="row" style="gap:12px"><b>Hashrate</b>
-   <span class="lg" data-s="ths" title="Mostrar/ocultar" style="color:var(--acc)"><b id="lvThs">—</b> TH/s</span>
-   <span class="lg" data-s="temp" title="Mostrar/ocultar" style="color:var(--warn)"><b id="lvTemp">—</b> chip °C</span>
+   <span class="lg" data-s="ths" title="Mostrar/ocultar" style="color:var(--ths)"><b id="lvThs">—</b> TH/s</span>
+   <span class="lg" data-s="temp" title="Mostrar/ocultar" style="color:var(--temp)"><b id="lvTemp">—</b> chip °C</span>
    <span class="lg" data-s="fan" title="Mostrar/ocultar" style="color:var(--fan)"><b id="lvFan">—</b> rpm ventiladores</span>
   </div>
   <div class="seg" id="chartWin">
@@ -137,7 +137,7 @@ async function drawChart(){
  // always shows e.g. 24 h even while it is still filling from the right).
  const ref=all[all.length-1][0],x0=ref-chartWin,x1=ref;
  const data=all.filter(d=>d[0]>=x0-30);
- const pad={l:42,r:38,t:12,b:22};
+ const pad={l:42,r:76,t:12,b:22};
  const PX=W-pad.l-pad.r,PY=H-pad.t-pad.b;
  const ths=data.map(d=>d[1]).filter(v=>v!=null);
  const temps=data.map(d=>d[3]).filter(v=>v!=null);
@@ -157,12 +157,12 @@ async function drawChart(){
  for(let i=0;i<=3;i++){const yy=pad.t+PY*(1-i/3);x.strokeStyle=cssv("--line");x.beginPath();x.moveTo(pad.l,yy);x.lineTo(W-pad.r,yy);x.stroke();}
  // left axis: TH/s; when hashrate is hidden it shows the fans' rpm instead
  x.textAlign="right";
- if(SHOW.ths){x.fillStyle=cssv("--mut");for(let i=0;i<=3;i++){const v=mn+(mx-mn)*i/3;x.fillText(v.toFixed(1),pad.l-4,py(v)+3);}}
- else if(SHOW.fan&&fans.length){x.fillStyle=cssv("--fan");for(let i=0;i<=3;i++){const v=fmn+(fmx-fmn)*i/3;x.fillText((v/1000).toFixed(1)+"k",pad.l-4,pyf(v)+3);}}
+ if(SHOW.ths){x.fillStyle=cssv("--ths");for(let i=0;i<=3;i++){const v=mn+(mx-mn)*i/3;x.fillText(v.toFixed(1),pad.l-4,py(v)+3);}}
+ 
  // right axis: °C; when temperature is hidden it shows the fans' rpm
  x.textAlign="left";
- if(SHOW.temp){x.fillStyle=cssv("--warn");for(let i=0;i<=3;i++){const v=tmn+(tmx-tmn)*i/3;x.fillText(v.toFixed(0)+"°",W-pad.r+4,pyt(v)+3);}}
- else if(SHOW.fan&&fans.length&&SHOW.ths){x.fillStyle=cssv("--fan");for(let i=0;i<=3;i++){const v=fmn+(fmx-fmn)*i/3;x.fillText((v/1000).toFixed(1)+"k",W-pad.r+4,pyf(v)+3);}}
+ if(SHOW.temp){x.fillStyle=cssv("--temp");for(let i=0;i<=3;i++){const v=tmn+(tmx-tmn)*i/3;x.fillText(v.toFixed(0)+"°",W-pad.r+4,pyt(v)+3);}}
+  if(SHOW.fan&&fans.length){x.fillStyle=cssv("--fan");for(let i=0;i<=3;i++){const v=fmn+(fmx-fmn)*i/3;x.fillText(Math.round(v),W-pad.r+34,pyf(v)+3);}x.fillText("rpm",W-pad.r+34,pad.t+PY+14);}
  // x axis (hours)
  const N=W<520?3:6;x.fillStyle=cssv("--mut");x.textAlign="center";
  for(let i=0;i<=N;i++){const t=x0+(x1-x0)*i/N,X=px(t);x.strokeStyle=cssv("--line");x.globalAlpha=.5;x.beginPath();x.moveTo(X,pad.t);x.lineTo(X,H-pad.b);x.stroke();x.globalAlpha=1;x.fillText(hhmm(t),X,H-6);}
@@ -177,15 +177,15 @@ async function drawChart(){
   // area under ths
   x.beginPath();let on=false;data.forEach(d=>{const X=px(d[0]),Y=py(d[1]);on?x.lineTo(X,Y):x.moveTo(X,Y);on=true;});
   x.lineTo(px(data[data.length-1][0]),py(mn));x.lineTo(px(data[0][0]),py(mn));x.closePath();
-  const g=x.createLinearGradient(0,pad.t,0,H-pad.b);g.addColorStop(0,"rgba(90,169,255,.28)");g.addColorStop(1,"rgba(90,169,255,0)");x.fillStyle=g;x.fill();
+  const g=x.createLinearGradient(0,pad.t,0,H-pad.b);g.addColorStop(0,"rgba(242,201,76,.22)");g.addColorStop(1,"rgba(242,201,76,0)");x.fillStyle=g;x.fill();
  }
  // fans' average rpm (own scale)
  if(SHOW.fan&&fans.length){draw(4);x.strokeStyle=cssv("--fan");x.lineWidth=1.3;x.stroke();}
  // chip temp (right axis)
- if(SHOW.temp){draw(3);x.strokeStyle=cssv("--warn");x.lineWidth=1.4;x.stroke();}
+ if(SHOW.temp){draw(3);x.strokeStyle=cssv("--temp");x.lineWidth=1.4;x.stroke();}
  if(SHOW.ths){
   // ths (main)
-  draw(1);x.strokeStyle=cssv("--acc");x.lineWidth=1.8;x.stroke();
+  draw(1);x.strokeStyle=cssv("--ths");x.lineWidth=1.8;x.stroke();
  }
  const last=ths[ths.length-1],lt=temps.length?temps[temps.length-1]:null,lf=fans.length?fans[fans.length-1]:null;
  info.textContent=`${last.toFixed(2)} TH/s · mín ${Math.min(...ths).toFixed(2)} · máx ${Math.max(...ths).toFixed(2)}`+(lt!=null?` · chip ${lt.toFixed(0)}°`:"")+(lf!=null?` · ventiladores ${lf} rpm (${Math.min(...fans)}–${Math.max(...fans)})`:"");
@@ -213,7 +213,7 @@ async function tick(){
   const _fa=_fv.length?Math.round(_fv.reduce((a,b)=>a+b,0)/_fv.length):null;
   const _fpc=s.power?.fan_pct,_fp=_fpc==null?"":(s.power?.manual?`al ${_fpc} %`:`auto · mín ${_fpc} %`);
   const k=[["Hashrate 20 s",(su.ths_20s||0).toFixed(2)+" TH/s"],["Ventiladores (media)",_fa!=null?_fa+" rpm":(s.power?.level===3&&!s.power?.manual?"— · reposo":"—"),_fa!=null?_fp:""],["Errores HW",(su.hw_pct??"?")+" %"],["Rechazadas",(su.reject_pct??"?")+" %"]];
-  document.getElementById("kpi").innerHTML=k.map(([a,b,c])=>`<div class="card"><div class="mut">${a}</div><div class="big">${esc(b)}</div>${c?`<div style="font-size:20px;font-weight:700;color:#b89cff;margin-top:2px">${esc(c)}</div>`:""}</div>`).join("");
+  document.getElementById("kpi").innerHTML=k.map(([a,b,c])=>`<div class="card"><div class="mut">${a}</div><div class="big">${esc(b)}</div>${c?`<div style="font-size:20px;font-weight:700;color:var(--fan);margin-top:2px">${esc(c)}</div>`:""}</div>`).join("");
   const _ct=(s.boards||[]).map(b=>b.temp_chip_c).filter(v=>v!=null),_mt=_ct.length?Math.max(..._ct):null;
   const lv=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
   lv("lvFan",_fa!=null?_fa:"—");
