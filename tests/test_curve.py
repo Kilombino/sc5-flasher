@@ -133,3 +133,14 @@ class TargetModeTests(unittest.TestCase):
         from sc5.curve import target_step, FAN_MIN
         self.assertEqual(target_step(70, self.CFG, FAN_MIN, 999), (FAN_MIN, True))
         self.assertEqual(target_step(80, self.CFG, None, None), (72, True))
+
+
+class TargetColdRescueTests(unittest.TestCase):
+    CFG = {"points": [[70, 50], [80, 72], [84, 85], [88, 100]], "step": 1,
+           "mode": "target", "target_c": 80, "adjust_s": 60}
+
+    def test_far_too_cold_drops_to_curve_value_for_target(self):
+        from sc5.curve import target_step
+        self.assertEqual(target_step(67, self.CFG, 96, 5), (72, True))
+        # already at/below that guess: normal 1 % behaviour
+        self.assertEqual(target_step(77, self.CFG, 70, 999), (69, True))

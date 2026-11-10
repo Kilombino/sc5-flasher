@@ -152,7 +152,8 @@ def target_step(temp_c, cfg, current, since_adjust):
     """Thermostat mode: returns (pct, adjusted). Holds `current` while the chip
     sits at target_c; +1 % if hotter, -1 % if cooler, at most once every
     adjust_s seconds. Never below the curve once the chip is TARGET_RESCUE_C
-    over target, and 100 % at SAFE_MAX_C."""
+    over target; TARGET_RESCUE_C under target it drops straight to the curve's
+    value for the target. 100 % at SAFE_MAX_C."""
     if temp_c is None:
         return current, False
     if temp_c >= SAFE_MAX_C:
@@ -164,6 +165,12 @@ def target_step(temp_c, cfg, current, since_adjust):
         floor = target_pct(temp_c, cfg) or current
         if floor > current:
             return min(100, floor), True
+    if temp_c <= tgt - TARGET_RESCUE_C:
+        # far too cold (e.g. just after a rescue to 100 %): jump down to what the
+        # curve says holds the target, instead of creeping 1 %/min for half an hour
+        guess = target_pct(tgt, cfg)
+        if guess is not None and guess < current:
+            return max(FAN_MIN, guess), True
     if since_adjust is not None and since_adjust < cfg.get("adjust_s", 60):
         return current, False
     if temp_c > tgt:
