@@ -166,6 +166,12 @@ async function drawChart(){
  // x axis (hours)
  const N=W<520?3:6;x.fillStyle=cssv("--mut");x.textAlign="center";
  for(let i=0;i<=N;i++){const t=x0+(x1-x0)*i/N,X=px(t);x.strokeStyle=cssv("--line");x.globalAlpha=.5;x.beginPath();x.moveTo(X,pad.t);x.lineTo(X,H-pad.b);x.stroke();x.globalAlpha=1;x.fillText(hhmm(t),X,H-6);}
+ // no readings (idle: cgminer stopped, or miner off): shade it instead of a flat/missing line
+ {let st=null;const nod=d=>d[3]==null&&(d[4]==null)&&!(d[1]>0);
+  const shade=(a,b)=>{const X0=px(a),X1=Math.max(px(b),X0+2);x.fillStyle=cssv("--mut");x.globalAlpha=.13;x.fillRect(X0,pad.t,X1-X0,H-pad.t-pad.b);x.globalAlpha=.85;
+   if(X1-X0>70){x.textAlign="center";x.fillText("reposo · sin lecturas",(X0+X1)/2,pad.t+12);}x.globalAlpha=1;};
+  data.forEach((d,i)=>{if(nod(d)){if(st==null)st=d[0];}else if(st!=null){shade(st,d[0]);st=null;}});
+  if(st!=null)shade(st,data[data.length-1][0]);}
  const draw=idx=>{x.beginPath();let on=false;data.forEach(d=>{const v=d[idx];if(v==null){on=false;return;}const X=px(d[0]),Y=idx===3?pyt(v):idx===4?pyf(v):py(v);on?x.lineTo(X,Y):x.moveTo(X,Y);on=true;});};
  if(SHOW.ths){
   // area under ths
@@ -205,7 +211,7 @@ async function tick(){
   document.getElementById("sub").textContent=`${d.miner||""} · encendido ${Math.floor(up/3600)} h ${Math.floor(up%3600/60)} min · ${s.algorithm||""} · ${s.power?.plan||""}`;
   const _f={};(s.boards||[]).forEach(b=>(b.fans_rpm||[]).forEach((r,i)=>{if(typeof r==="number"&&!(i in _f))_f[i]=r;}));const _fv=Object.values(_f);
   const _fa=_fv.length?Math.round(_fv.reduce((a,b)=>a+b,0)/_fv.length):null;
-  const k=[["Hashrate 20 s",(su.ths_20s||0).toFixed(2)+" TH/s"],["Ventiladores (media)",_fa!=null?_fa+" rpm":(s.power?.level===3&&!s.power?.manual?"100 % · reposo":"—")],["Errores HW",(su.hw_pct??"?")+" %"],["Rechazadas",(su.reject_pct??"?")+" %"]];
+  const k=[["Hashrate 20 s",(su.ths_20s||0).toFixed(2)+" TH/s"],["Ventiladores (media)",_fa!=null?_fa+" rpm":(s.power?.level===3&&!s.power?.manual?"sin lectura (reposo)":"—")],["Errores HW",(su.hw_pct??"?")+" %"],["Rechazadas",(su.reject_pct??"?")+" %"]];
   document.getElementById("kpi").innerHTML=k.map(([a,b])=>`<div class="card"><div class="mut">${a}</div><div class="big">${esc(b)}</div></div>`).join("");
   const _ct=(s.boards||[]).map(b=>b.temp_chip_c).filter(v=>v!=null),_mt=_ct.length?Math.max(..._ct):null;
   const lv=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
