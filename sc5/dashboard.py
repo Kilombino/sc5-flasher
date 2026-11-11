@@ -118,7 +118,7 @@ button.warn{border-color:var(--warn)}button.danger{border-color:var(--bad)}
 
 <h2>Pools</h2>
 <div class="card"><table><thead><tr><th></th><th>Pool</th><th>Usuario</th><th>Estado</th><th>Acept.</th><th>Rech.</th><th class="pc" style="display:none">Prioridad</th></tr></thead><tbody id="pools"></tbody></table>
-<div class="mut pc" style="font-size:12px;margin-top:8px;display:none">El minero mina en el primer pool vivo de la lista; los demás son de reserva, por orden. Subir uno arriba del todo cambia dónde mina (lo mismo que arrastrarlo en el panel de Goldshell).</div></div>
+<div class="mut pc" style="font-size:12px;margin-top:8px;display:none">El minero mina solo en el primer pool vivo de la lista (● minando). Los marcados ○ reserva tienen la conexión abierta para saltar al instante si el primero cae, pero no reciben trabajo. El resto son reserva por orden. Subir uno arriba del todo cambia dónde mina (lo mismo que arrastrarlo en el panel de Goldshell).</div></div>
 
 <div id="warn" style="margin-top:12px"></div>
 <p class="mut" style="margin-top:18px">Solo acciones reversibles y de fábrica. Nunca firmware ni reset de fábrica.</p>
@@ -238,7 +238,8 @@ async function tick(){
   document.getElementById("boards").innerHTML=(s.boards||[]).map(b=>`<tr><td>${esc(b.id)}</td><td class="${b.status==="Alive"?"o":"b"}">${esc(b.status)}</td><td>${b.ths_20s.toFixed(2)}</td><td>${esc(b.clock_mhz)}</td><td>${((b.voltage_mv||0)/1000).toFixed(2)}</td><td>${cell(b.temp_chip_c)}</td><td>${cell(b.temp_board_c)}</td><td>${esc(b.fans_rpm.join(" "))}</td><td>${esc(b.hw_pct)}</td></tr>`).join("");
   const _pl=[...(s.pools||[])].sort((a,b)=>(a.priority??0)-(b.priority??0));lastPools=_pl;
   const mv=(i,m,t,dis)=>`<button class="pm" data-i="${i}" data-m="${m}" title="${t}"${dis?" disabled":""}>${{top:"⇈",up:"↑",down:"↓"}[m]}</button>`;
-  document.getElementById("pools").innerHTML=_pl.map((p,i)=>`<tr><td>${p.active?"●":""}</td><td>${esc(p.url)}</td><td>${esc(p.user)}</td><td>${esc(p.status)}</td><td>${esc(p.accepted)}</td><td>${esc(p.rejected)}</td>`+
+  const _mi=_pl.findIndex(p=>p.active&&p.status==="Alive");
+  document.getElementById("pools").innerHTML=_pl.map((p,i)=>`<tr><td title="${i===_mi?"Minando aquí":(p.active?"Conectado de reserva (no mina)":"")}">${i===_mi?'<span class="o">● minando</span>':(p.active?'<span class="mut">○ reserva</span>':"")}</td><td>${esc(p.url)}</td><td>${esc(p.user)}</td><td>${esc(p.status)}</td><td>${esc(p.accepted)}</td><td>${esc(p.rejected)}</td>`+
    (CONTROL?`<td class="pc" style="white-space:nowrap">${mv(i,"top","Arriba del todo (minar aquí)",i===0)}${mv(i,"up","Subir",i===0)}${mv(i,"down","Bajar",i===_pl.length-1)}</td>`:"")+`</tr>`).join("");
   if(CONTROL){document.querySelectorAll(".pc").forEach(e=>e.style.display="");document.querySelectorAll("#pools .pm").forEach(b=>b.onclick=()=>movePool(+b.dataset.i,b.dataset.m));}
   document.getElementById("warn").innerHTML=[...(s.notes||[]).map(n=>`<div class="mut">ℹ ${esc(n)}</div>`),...(s.warnings||[]).map(w=>`<div class="w">⚠ ${esc(w)}</div>`),...(s.errors||[]).map(e=>`<div class="b">✖ ${esc(e)}</div>`)].join("");
@@ -306,7 +307,9 @@ async function curvePost(cfg){
  const j=await r.json();toast(j.cfg?"Curva guardada ✓":("Error: "+(j.error||r.status)));curveEditing=false;curveRefresh();
 }
 function wireCurve(){
- document.getElementById("curveToggle").onclick=()=>curvePost({enabled:!(curveCfg&&curveCfg.enabled)});
+ document.getElementById("curveToggle").onclick=()=>{const on=!(curveCfg&&curveCfg.enabled);
+  if(on&&!confirm("¿Activar la curva propia? Si el ventilador está en Auto (de fábrica), el minero tiene que pasar a ventilador manual y eso reinicia el minado UNA vez (~2 min sin minar). Después la curva ajusta el ventilador sin más reinicios."))return;
+  curvePost({enabled:on});};
  document.getElementById("curveAdd").onclick=()=>{curveEditing=true;document.getElementById("curveRows").appendChild(curveRow(75,75));};
  document.getElementById("curveSave").onclick=()=>curvePost({points:readPoints(),step:+document.getElementById("curveStep").value});
  document.querySelectorAll("#curveMode button").forEach(b=>b.onclick=()=>curvePost({mode:b.dataset.cm}));
