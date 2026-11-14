@@ -177,6 +177,16 @@ def save_learned(target_c, pct):
     os.replace(tmp, LEARNED)
 
 
+START_PCT_AT_82 = 60    # fan % to start from when the thermostat is switched on
+START_PCT_PER_C = 4     # each degree of target below 82 C starts 4 % higher (and above, lower)
+
+
+def start_pct(target_c):
+    """Where the thermostat starts when it is switched on: 60 % for a 82 C target,
+    proportionally more fan for a cooler target and less for a warmer one."""
+    return max(FAN_MIN, min(100, START_PCT_AT_82 + START_PCT_PER_C * (82 - int(target_c))))
+
+
 def target_step(temp_c, cfg, current, since_adjust, learned=None):
     """Thermostat mode: returns (pct, adjusted). Holds `current` while the chip
     sits at target_c; +1 % if hotter, -1 % if cooler, at most once every
@@ -311,7 +321,12 @@ class Supervisor:
                     now = time.monotonic()
                     since = None if self._last_adjust is None else now - self._last_adjust
                     tgt_c = cfg.get("target_c", 80)
-                    target, adjusted = target_step(temp, cfg, ref, since, load_learned(tgt_c))
+                    if self.applied is None and temp is not None and temp < SAFE_MAX_C:
+                        # just switched on (or the panel restarted): start from the
+                        # proportional value for this target, then regulate from there
+                        target, adjusted = start_pct(tgt_c), True
+                    else:
+                        target, adjusted = target_step(temp, cfg, ref, since, load_learned(tgt_c))
                     if adjusted:
                         self._last_adjust = now
                     # Learn the fan % that holds the target: the chip within

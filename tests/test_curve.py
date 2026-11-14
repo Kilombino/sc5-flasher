@@ -145,6 +145,14 @@ class TargetModeTests(unittest.TestCase):
         self.assertEqual(target_step(70, self.CFG, 72, 10), (72, False))   # still rate limited
         self.assertEqual(target_step(79, self.CFG, 72, 999), (71, True))   # near target: 1 %
 
+    def test_start_pct_is_proportional_to_the_target(self):
+        from sc5.curve import start_pct, FAN_MIN
+        self.assertEqual(start_pct(82), 60)
+        self.assertEqual(start_pct(80), 68)
+        self.assertEqual(start_pct(84), 52)
+        self.assertEqual(start_pct(65), 100)
+        self.assertGreaterEqual(start_pct(95), FAN_MIN)
+
     def test_learned_file_roundtrip(self):
         import tempfile, os
         from sc5 import curve
@@ -175,3 +183,34 @@ class TargetColdRescueTests(unittest.TestCase):
         self.assertEqual(target_step(67, self.CFG, 96, 5), (72, True))
         # already at/below that guess but still far below the target: 3 % steps
         self.assertEqual(target_step(77, self.CFG, 70, 999), (67, True))
+
+
+class SupervisorStartTests(unittest.TestCase):
+    def test_switching_on_starts_at_the_proportional_value(self):
+        import tempfile, os, time
+        from sc5 import curve
+
+        class Miner:
+            def __init__(self):
+                self.calls = []
+            def do(self, action, value):
+                self.calls.append((action, value))
+
+        snap = {"power": {"manual": False, "level": 0, "fan_pct": 30},
+                "boards": [{"temp_chip_c": 86.0}]}
+        with tempfile.TemporaryDirectory() as d:
+            old_cfg, old_learned = curve.CONFIG, curve.LEARNED
+            curve.CONFIG = os.path.join(d, "curve.json")
+            curve.LEARNED = os.path.join(d, "learned.json")
+            try:
+                m = Miner()
+                cfg = {"enabled": True, "mode": "target", "target_c": 82, "step": 1,
+                       "points": [[60, 40], [82, 78], [88, 100]], "adjust_s": 60}
+                sup = curve.Supervisor(m, lambda: snap, cfg=cfg, interval=0.05)
+                sup.start()
+                time.sleep(0.3)
+                sup.stop()
+                # 86 C is past target+3, but on switching on it starts at 60 %, not the curve's 92 %
+                self.assertEqual(m.calls[0], ("fan", 60))
+            finally:
+                curve.CONFIG, curve.LEARNED = old_cfg, old_learned
