@@ -148,7 +148,36 @@ def hold_target(temp_c, cfg, current):
 TARGET_RESCUE_C = 3   # this far above target, jump straight to the curve
 
 
-def target_step(temp_c, cfg, current, since_adjust):
+LEARNED = os.path.expanduser("~/.config/sc5-flasher/learned.json")
+LEARN_BAND_C = 1        # within this many degrees of the target counts as "holding it"
+LEARN_AFTER_S = 300     # held that long at the same fan % -> remember that %
+FAST_DOWN_PCT = 3       # far below target: drop this many % per step instead of 1
+
+
+def load_learned(target_c):
+    """The fan % that last held the chip at target_c, or None."""
+    try:
+        with open(LEARNED) as f:
+            v = json.load(f).get(str(int(target_c)))
+        return int(v) if v is not None else None
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def save_learned(target_c, pct):
+    try:
+        with open(LEARNED) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        data = {}
+    data[str(int(target_c))] = int(pct)
+    tmp = LEARNED + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f)
+    os.replace(tmp, LEARNED)
+
+
+def target_step(temp_c, cfg, current, since_adjust, learned=None):
     """Thermostat mode: returns (pct, adjusted). Holds `current` while the chip
     sits at target_c; +1 % if hotter, -1 % if cooler, at most once every
     adjust_s seconds. Never below the curve once the chip is TARGET_RESCUE_C
@@ -166,13 +195,17 @@ def target_step(temp_c, cfg, current, since_adjust):
         if floor > current:
             return min(100, floor), True
     if temp_c <= tgt - TARGET_RESCUE_C:
-        # far too cold (e.g. just after a rescue to 100 %): jump down to what the
-        # curve says holds the target, instead of creeping 1 %/min for half an hour
-        guess = target_pct(tgt, cfg)
+        # far too cold (e.g. just after a rescue or a reboot): jump down to the fan %
+        # that last held the target (learned), else to what the curve says for it,
+        # instead of creeping 1 %/min for half an hour
+        guess = learned if learned is not None else target_pct(tgt, cfg)
         if guess is not None and guess < current:
             return max(FAN_MIN, guess), True
     if since_adjust is not None and since_adjust < cfg.get("adjust_s", 60):
         return current, False
+    if temp_c <= tgt - TARGET_RESCUE_C:
+        # still far below after that jump: come down faster than 1 %
+        return max(FAN_MIN, current - FAST_DOWN_PCT), True
     if temp_c > tgt:
         return min(100, current + 1), True
     if temp_c < tgt:
@@ -223,6 +256,8 @@ class Supervisor:
         self.last_temp = None
         self.last_error = None
         self._last_adjust = None
+        self._hold_since = None
+        self._hold_pct = None
         self._stop = threading.Event()
         self._thread = None
         self._lock = threading.Lock()
@@ -275,9 +310,21 @@ class Supervisor:
                 if cfg.get("mode") == "target":
                     now = time.monotonic()
                     since = None if self._last_adjust is None else now - self._last_adjust
-                    target, adjusted = target_step(temp, cfg, ref, since)
+                    tgt_c = cfg.get("target_c", 80)
+                    target, adjusted = target_step(temp, cfg, ref, since, load_learned(tgt_c))
                     if adjusted:
                         self._last_adjust = now
+                    # Learn the fan % that holds the target: the chip within
+                    # LEARN_BAND_C of it for LEARN_AFTER_S at the same fan %.
+                    if temp is not None and ref is not None and abs(temp - tgt_c) <= LEARN_BAND_C:
+                        if self._hold_pct != ref:
+                            self._hold_pct, self._hold_since = ref, now
+                        elif now - self._hold_since >= LEARN_AFTER_S:
+                            if load_learned(tgt_c) != ref:
+                                save_learned(tgt_c, ref)
+                            self._hold_since = now
+                    else:
+                        self._hold_pct = self._hold_since = None
                 else:
                     target = hold_target(temp, cfg, ref)
                 with self._lock:

@@ -129,6 +129,37 @@ class TargetModeTests(unittest.TestCase):
         self.assertEqual(target_step(88, self.CFG, 60, 5), (100, True))
         self.assertEqual(target_step(None, self.CFG, 60, 999), (60, False))
 
+    def test_far_below_jumps_to_learned(self):
+        from sc5.curve import target_step
+        # after a reboot the fans sit high and the chip is cold: go straight to the
+        # % that last held the target, not to the (higher) curve value for it
+        self.assertEqual(target_step(67, self.CFG, 85, 5, learned=55), (55, True))
+        # without a learned value: the curve's value for the target, as before
+        self.assertEqual(target_step(67, self.CFG, 85, 5), (72, True))
+        # a learned value above the current % is not a reason to raise the fans
+        self.assertEqual(target_step(67, self.CFG, 50, 999, learned=55), (47, True))
+
+    def test_far_below_comes_down_faster(self):
+        from sc5.curve import target_step, FAST_DOWN_PCT
+        self.assertEqual(target_step(70, self.CFG, 72, 999), (72 - FAST_DOWN_PCT, True))
+        self.assertEqual(target_step(70, self.CFG, 72, 10), (72, False))   # still rate limited
+        self.assertEqual(target_step(79, self.CFG, 72, 999), (71, True))   # near target: 1 %
+
+    def test_learned_file_roundtrip(self):
+        import tempfile, os
+        from sc5 import curve
+        with tempfile.TemporaryDirectory() as d:
+            old = curve.LEARNED
+            curve.LEARNED = os.path.join(d, "learned.json")
+            try:
+                self.assertIsNone(curve.load_learned(82))
+                curve.save_learned(82, 57)
+                curve.save_learned(80, 60)
+                self.assertEqual(curve.load_learned(82), 57)
+                self.assertEqual(curve.load_learned(80), 60)
+            finally:
+                curve.LEARNED = old
+
     def test_floor_and_start(self):
         from sc5.curve import target_step, FAN_MIN
         self.assertEqual(target_step(70, self.CFG, FAN_MIN, 999), (FAN_MIN, True))
@@ -142,5 +173,5 @@ class TargetColdRescueTests(unittest.TestCase):
     def test_far_too_cold_drops_to_curve_value_for_target(self):
         from sc5.curve import target_step
         self.assertEqual(target_step(67, self.CFG, 96, 5), (72, True))
-        # already at/below that guess: normal 1 % behaviour
-        self.assertEqual(target_step(77, self.CFG, 70, 999), (69, True))
+        # already at/below that guess but still far below the target: 3 % steps
+        self.assertEqual(target_step(77, self.CFG, 70, 999), (67, True))
