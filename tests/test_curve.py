@@ -214,3 +214,41 @@ class SupervisorStartTests(unittest.TestCase):
                 self.assertEqual(m.calls[0], ("fan", 60))
             finally:
                 curve.CONFIG, curve.LEARNED = old_cfg, old_learned
+
+
+class KeepsCurveTests(unittest.TestCase):
+    def test_mode_change_keeps_the_curve_except_eco(self):
+        from sc5.curve import keeps_curve
+        self.assertTrue(keeps_curve("mode", "hash"))
+        self.assertTrue(keeps_curve("mode", "idle"))
+        self.assertFalse(keeps_curve("mode", "eco"))   # the curve would run Eco at 700 MHz
+
+    def test_fixed_fan_switches_it_off_and_other_actions_do_not(self):
+        from sc5.curve import keeps_curve
+        self.assertFalse(keeps_curve("fan", "75"))
+        self.assertFalse(keeps_curve("fan", "auto"))
+        self.assertTrue(keeps_curve("led", True))
+        self.assertTrue(keeps_curve("pool", {"url": "x", "move": "up"}))
+
+
+class OverheatGuardTests(unittest.TestCase):
+    def snap(self, temp, manual=False, level=0, fan=30):
+        return {"power": {"manual": manual, "level": level, "fan_pct": fan},
+                "boards": [{"temp_chip_c": temp}]}
+
+    def test_trips_on_hash_preset_stuck_at_low_fans(self):
+        from sc5.curve import overheat_guard
+        self.assertTrue(overheat_guard(self.snap(93.0), False))
+        self.assertTrue(overheat_guard(self.snap(88.0, manual=True, level=2, fan=60), False))
+
+    def test_quiet_when_cool_curve_on_already_max_or_no_reading(self):
+        from sc5.curve import overheat_guard
+        self.assertFalse(overheat_guard(self.snap(87.9), False))
+        self.assertFalse(overheat_guard(self.snap(93.0), True))            # the curve handles it
+        self.assertFalse(overheat_guard(self.snap(93.0, manual=True, fan=100), False))
+        self.assertFalse(overheat_guard({"power": {"manual": False, "level": 0}, "boards": []}, False))
+
+    def test_never_touches_eco_or_idle_presets(self):
+        from sc5.curve import overheat_guard
+        self.assertFalse(overheat_guard(self.snap(93.0, level=2, fan=50), False))   # a fan write would leave Eco
+        self.assertFalse(overheat_guard(self.snap(93.0, level=3, fan=100), False))

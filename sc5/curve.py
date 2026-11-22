@@ -237,6 +237,37 @@ def current_fan_pct(snapshot):
     return (snapshot.get("power") or {}).get("fan_pct")
 
 
+def keeps_curve(action, arg):
+    """Whether a manual control leaves the software curve switched on.
+
+    A fixed fan % is an explicit override, so it switches the curve off. A mode
+    change does not: Hash and Idle keep it (in Idle the supervisor just waits),
+    so the fans are never left on the Hash preset's fixed 30 %. Eco is the
+    exception: the curve drives the fan through the custom plan, which mines at
+    700 MHz, so leaving it on would silently undo Eco."""
+    if action == "fan":
+        return False
+    if action == "mode":
+        return arg in ("hash", "idle")
+    return True
+
+
+def overheat_guard(snapshot, curve_enabled):
+    """True when the panel itself must force 100 % fans: the curve is off, the
+    miner runs the Hash preset or the custom plan (both 700 MHz, so a fan write
+    changes nothing else) and a chip is at/above SAFE_MAX_C with the fans below
+    100 %. The firmware's own ramp has been seen to hold 30 % up to 93 C."""
+    if curve_enabled:
+        return False
+    pw = (snapshot or {}).get("power") or {}
+    if not pw.get("manual") and pw.get("level") != 0:
+        return False
+    temp = max_chip_temp(snapshot or {})
+    if temp is None or temp < SAFE_MAX_C:
+        return False
+    return pw.get("fan_pct") != 100
+
+
 def needs_write(target, actual, applied):
     """True if we must set the fan to `target`. Compared against the miner's
     REAL fan (`actual`) when we could read it, else our last `applied` value.

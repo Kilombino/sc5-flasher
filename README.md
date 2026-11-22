@@ -104,7 +104,9 @@ curve on the one safe lever — the fan floor. Define points like:
 
 Between points the fan % is interpolated; the fan never drops as temperature rises,
 never goes below a 40 % floor, and is forced to 100 % above the safety temperature.
-Picking a fixed fan % disables the curve.
+Picking a fixed fan % (or Eco, which runs its own factory plan) disables the curve;
+switching to Hash or Idle keeps it. With the curve off, the panel still forces 100 %
+fans if a chip reaches 88 °C on the Hash or custom plan.
 
 **The miner protects itself regardless:** its firmware shuts the hashboard down on
 overheat (cutoff ~105 °C chip / ~89 °C board), independent of this panel.

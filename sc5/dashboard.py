@@ -226,7 +226,7 @@ async function tick(){
   const _fpc=s.power?.fan_pct,_fp=_fpc==null?"":(s.power?.manual?`al ${_fpc} %`:`auto · mín ${_fpc} %`);
   const _avg=a=>{a=a.filter(v=>typeof v==="number");return a.length?(a.reduce((x,y)=>x+y,0)/a.length).toFixed(1):null;};
   const _tc=_avg((s.boards||[]).map(b=>b.temp_chip_c)),_tb=_avg((s.boards||[]).map(b=>b.temp_board_c));
-  const k=[["Hashrate 20 s",(su.ths_20s||0).toFixed(2)+" TH/s"],["Ventiladores (media)",_fa!=null?_fa+" rpm":(s.power?.level===3&&!s.power?.manual?"— · reposo":"—"),_fa!=null?_fp:""],["Errores HW",(su.hw_pct??"?")+" %"],["Rechazadas",(su.reject_pct??"?")+" %"]];
+  const k=[["Hashrate 20 s",(su.ths_20s||0).toFixed(2)+" TH/s"],["Ventiladores (media)",_fa!=null?_fa+" rpm":(s.power?.level===3&&!s.power?.manual?(_fpc!=null?_fpc+" % · reposo":"— · reposo"):"—"),_fa!=null?_fp:(s.power?.level===3&&!s.power?.manual?"sin lectura de rpm":"")],["Errores HW",(su.hw_pct??"?")+" %"],["Rechazadas",(su.reject_pct??"?")+" %"]];
   const _tcard=`<div class="card"><div class="mut">Temperatura media</div><div class="big" style="white-space:nowrap;font-size:24px;color:${tcol(_tc==null?null:+_tc,75,85,90)}">chip ${_tc??"—"} °C</div><div style="font-size:17px;font-weight:700;white-space:nowrap;color:${tcol(_tb==null?null:+_tb,65,80,89)}">placas ${_tb??"—"} °C</div></div>`;
   const _cards=k.map(([a,b,c,col])=>`<div class="card"><div class="mut">${a}</div><div class="big">${esc(b)}</div>${c?`<div style="font-size:17px;font-weight:700;white-space:nowrap;color:${col||"var(--fan)"};margin-top:2px">${esc(c)}</div>`:""}</div>`);
   _cards.splice(2,0,_tcard);document.getElementById("kpi").innerHTML=_cards.join("");
@@ -355,10 +355,19 @@ def serve(host, bind="127.0.0.1", port=8099, control=False, sample_interval=20):
     # so the graph is continuous. Read-only; just reads the shared snapshot.
     history = History()
 
+    guard = {"last": 0.0}
+
     def _sampler():
         while True:
             try:
-                history.add(sample_from_snapshot(cache.get()))
+                snap = cache.get()
+                history.add(sample_from_snapshot(snap))
+                # Safety net with the curve off: never sit at/above SAFE_MAX_C with low fans.
+                if (control and time.time() - guard["last"] > 60
+                        and curvemod.overheat_guard(snap, supervisor.cfg.get("enabled"))):
+                    guard["last"] = time.time()
+                    miner.do("fan", "max")
+                    cache.invalidate()
             except Exception:
                 pass
             time.sleep(sample_interval)
@@ -402,10 +411,15 @@ def serve(host, bind="127.0.0.1", port=8099, control=False, sample_interval=20):
                 action = req.get("action")
                 if action not in ACTIONS:
                     raise ControlError(f"Unknown action {action!r}")
-                # A manual fan/mode choice overrides and disables the software curve.
-                if action in ("fan", "mode") and supervisor.cfg.get("enabled"):
+                arg = req.get("arg")
+                # A fixed fan % (or Eco) overrides and disables the software curve;
+                # Hash and Idle keep it, so a mode change never strands the fans at 30 %.
+                curve_off = supervisor.cfg.get("enabled") and not curvemod.keeps_curve(action, arg)
+                if curve_off:
                     supervisor.update({"enabled": False})
-                result = miner.do(action, req.get("arg"))
+                result = miner.do(action, arg)
+                if curve_off and action == "mode" and isinstance(result, dict):
+                    result["note"] = "Hecho ✓ · curva propia desactivada (en Eco manda el plan de fábrica)"
                 cache.invalidate()
                 self._send(200, json.dumps(result).encode(), "application/json")
             except ControlError as exc:
